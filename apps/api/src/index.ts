@@ -23,26 +23,44 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
 }));
 
-// CORS configuration: explicit whitelist
+// CORS configuration: explicit whitelist + dynamic support for Vercel deployments & localhost
 const allowedOrigins = [
   config.FRONTEND_URL,
   'http://localhost:3000',
   'http://127.0.0.1:3000',
   'capacitor://localhost',
   'ionic://localhost',
-];
+].filter(Boolean);
 
 app.use(cors({
   origin: (origin, callback) => {
     // Allow requests with no origin (e.g., mobile apps, curl, server-to-server webhooks)
-    if (!origin || allowedOrigins.includes(origin)) {
+    if (!origin) {
+      return callback(null, true);
+    }
+    const cleanOrigin = origin.replace(/\/$/, '');
+    const isAllowed =
+      allowedOrigins.some((allowed) => allowed && cleanOrigin === allowed.replace(/\/$/, '')) ||
+      cleanOrigin.endsWith('.vercel.app') ||
+      cleanOrigin.includes('localhost') ||
+      cleanOrigin.includes('127.0.0.1');
+
+    if (isAllowed) {
       return callback(null, true);
     }
     return callback(new Error(`CORS blocked for origin: ${origin}`));
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Shopify-Hmac-Sha256', 'X-Hub-Signature-256'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'X-Shopify-Hmac-Sha256',
+    'X-Shopify-Topic',
+    'X-Shopify-Shop-Domain',
+    'X-Shopify-Webhook-Id',
+    'X-Hub-Signature-256',
+  ],
 }));
 
 // Request logging
