@@ -37,6 +37,10 @@
   ],
   "author": "ByteForge",
   "license": "UNLICENSED",
+  "dependencies": {
+    "prisma": "^5.22.0",
+    "typescript": "^5.7.2"
+  },
   "devDependencies": {
     "concurrently": "^9.2.4"
   }
