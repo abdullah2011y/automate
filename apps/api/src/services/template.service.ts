@@ -58,6 +58,23 @@ export class TemplateService {
         return String(value).trim();
       }
 
+      // Check common variable aliases
+      if (varName === 'total_amount' || varName === 'total_price' || varName === 'order_total') {
+        const val = variables.total_amount || variables.order_total || variables.total_price;
+        if (val !== undefined && val !== null && String(val).trim() !== '') return String(val).trim();
+      }
+
+      if (varName === 'product_name' || varName === 'product_list' || varName === 'items' || varName === 'product') {
+        const val = variables.product_name || variables.product_list || variables.items || variables.product;
+        if (val !== undefined && val !== null && String(val).trim() !== '') return String(val).trim();
+      }
+
+      if (varName === 'quantity' || varName === 'total_quantity' || varName === 'qty') {
+        const val = variables.quantity || variables.total_quantity || variables.qty;
+        if (val !== undefined && val !== null && String(val).trim() !== '') return String(val).trim();
+        return '1';
+      }
+
       // Safe fallbacks for common variables
       switch (varName) {
         case 'customer_name':
@@ -69,6 +86,7 @@ export class TemplateService {
         case 'payment_method':
           return 'Cash on Delivery';
         case 'product_list':
+        case 'product_name':
           return 'Items ordered';
         case 'tracking_number':
         case 'tracking_url':

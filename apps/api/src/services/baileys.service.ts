@@ -16,6 +16,11 @@ import { usePostgresAuthState } from './baileys-auth.service';
 import { TemplateService, PollOption, DEFAULT_POLL_OPTIONS } from './template.service';
 import { AutomationService } from './automation.service';
 import {
+  toWhatsAppJid,
+  isCodGateway,
+  normalizePhoneNumber,
+} from '../utils/formatters';
+import {
   JobStatus,
   MessageDirection,
   MessageStatus,
@@ -217,6 +222,20 @@ export class BaileysService {
             dbStatus = MessageStatus.READ;
             updateData.status = dbStatus;
             updateData.readAt = new Date();
+          }
+
+          // Handle potential poll updates delivered via messages.update
+          const pollUpdates = (u.update as any)?.pollUpdates;
+          if (Array.isArray(pollUpdates)) {
+            for (const pollUpd of pollUpdates) {
+              const fakeMsg: proto.IWebMessageInfo = {
+                key: u.key,
+                message: {
+                  pollUpdateMessage: pollUpd,
+                },
+              };
+              await this.handleInboundPollVote(fakeMsg);
+            }
           }
 
           if (dbStatus) {
@@ -781,7 +800,7 @@ export class BaileysService {
       throw new Error('WhatsApp is not connected');
     }
 
-    const formattedJid = jid.includes('@') ? jid : `${jid.replace(/\D/g, '')}@s.whatsapp.net`;
+    const formattedJid = toWhatsAppJid(jid);
     return this.sock.sendMessage(formattedJid, { text });
   }
 
@@ -793,7 +812,7 @@ export class BaileysService {
       throw new Error('WhatsApp is not connected');
     }
 
-    const formattedJid = jid.includes('@') ? jid : `${jid.replace(/\D/g, '')}@s.whatsapp.net`;
+    const formattedJid = toWhatsAppJid(jid);
     return this.sock.sendMessage(formattedJid, {
       poll: {
         name: question,
@@ -814,7 +833,7 @@ export class BaileysService {
 
     const order = await prisma.order.findUnique({
       where: { id: orderId },
-      include: { customer: true, tenant: true },
+      include: { customer: true, tenant: true, items: true },
     });
 
     if (!order) return { queued: false, reason: 'Order not found' };
@@ -829,12 +848,18 @@ export class BaileysService {
       return { queued: false, reason: `Order is already ${order.confirmationStatus}` };
     }
 
+    const isCod = isCodGateway(order.paymentGateway);
     if (settings.eligibleOrderTypes && settings.eligibleOrderTypes.length > 0) {
-      if (!settings.eligibleOrderTypes.includes(order.paymentGateway)) {
-        return { queued: false, reason: `Payment gateway ${order.paymentGateway} is not in eligible order types` };
+      const isEligible = settings.eligibleOrderTypes.some((t) => {
+        const normTarget = t.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const normOrder = (order.paymentGateway || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        return normTarget === normOrder || (normTarget.includes('cod') && isCod);
+      });
+      if (!isEligible && !isCod) {
+        return { queued: false, reason: `Payment gateway "${order.paymentGateway}" is not in eligible order types` };
       }
-    } else if (settings.codOnly && order.paymentGateway !== 'cash_on_delivery') {
-      return { queued: false, reason: 'Order is not Cash on Delivery' };
+    } else if (settings.codOnly && !isCod) {
+      return { queued: false, reason: `Order gateway "${order.paymentGateway}" is not Cash on Delivery` };
     }
 
     const rawPhone = order.customer.phoneNumber;
@@ -850,9 +875,35 @@ export class BaileysService {
       return { queued: false, reason: 'Confirmation job already exists' };
     }
 
-    const template = await TemplateService.getDefaultTemplate('ORDER_CONFIRMATION');
+    let template = null;
+    if (settings.defaultTemplateId) {
+      template = await prisma.messageTemplate.findUnique({
+        where: { id: settings.defaultTemplateId },
+      });
+    }
+    if (!template) {
+      template = await TemplateService.getDefaultTemplate('ORDER_CONFIRMATION');
+    }
+
     const customerName = `${order.customer.firstName || 'Valued'} ${order.customer.lastName || 'Customer'}`.trim();
     const storeName = order.tenant.name || 'ByteForge Store';
+
+    const productList = order.items && order.items.length > 0
+      ? order.items.map((i) => `${i.quantity}x ${i.title}`).join(', ')
+      : 'Items ordered';
+
+    const shippingAddrObj = order.shippingAddress as any;
+    const shippingAddressText = shippingAddrObj
+      ? [shippingAddrObj.address1, shippingAddrObj.city, shippingAddrObj.province, shippingAddrObj.country].filter(Boolean).join(', ')
+      : '';
+
+    const totalQuantity = order.items && order.items.length > 0
+      ? order.items.reduce((sum, i) => sum + (i.quantity || 1), 0).toString()
+      : '1';
+
+    const productTitle = order.items && order.items.length > 0
+      ? order.items.map((i) => i.title).join(', ')
+      : 'Product';
 
     const templateVars = {
       customer_name: customerName,
@@ -860,7 +911,14 @@ export class BaileysService {
       order_number: order.shopifyOrderNumber,
       currency: order.currency || 'Rs.',
       order_total: order.totalPrice.toString(),
+      total_amount: order.totalPrice.toString(),
+      total_price: order.totalPrice.toString(),
+      product_name: productTitle,
+      product_list: productList,
+      quantity: totalQuantity,
+      total_quantity: totalQuantity,
       payment_method: 'Cash on Delivery',
+      shipping_address: shippingAddressText,
     };
 
     const renderedBody = TemplateService.render(template.body, templateVars);
@@ -948,8 +1006,8 @@ export class BaileysService {
         try {
           const params = job.parameters as any;
           const bodyText = params.renderedBody || 'Please confirm your order.';
-          const cleanPhone = job.recipientPhone.replace(/\D/g, '');
-          const jid = `${cleanPhone}@s.whatsapp.net`;
+          const jid = toWhatsAppJid(job.recipientPhone);
+          const cleanPhone = jid.split('@')[0];
 
           // Anti-ban delay
           await delay(delayMs);
