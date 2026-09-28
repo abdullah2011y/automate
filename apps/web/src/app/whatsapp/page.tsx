@@ -1265,62 +1265,69 @@ Order confirm ya cancel karne ke liye neeche diye gaye button par click karein.`
                     Customer WhatsApp Live Preview
                   </h4>
 
-                  {/* Simulated WhatsApp Bubble */}
-                  <div className="bg-[#0b141a] p-4 rounded-2xl border border-[#202c33] max-w-sm mx-auto shadow-inner space-y-3">
-                    <div className="bg-[#005c4b] text-[#e9edef] p-3.5 rounded-2xl rounded-tr-none text-xs leading-relaxed whitespace-pre-wrap shadow-md">
-                      {renderPreview(templateForm.body)}
-                      <div className="text-right text-[10px] text-[#8696a0] mt-1.5">12:45 PM ✓✓</div>
-                    </div>
-
-                    {/* Simulated Native WhatsApp Poll Card */}
-                    {templateForm.hasPoll && (
-                      <div className="bg-[#005c4b]/90 text-[#e9edef] p-3.5 rounded-2xl rounded-tr-none border border-emerald-600/40 shadow-md space-y-2.5">
-                        <div className="flex items-center gap-2 pb-2 border-b border-emerald-700/50">
-                          <span className="text-base">📊</span>
-                          <div>
-                            <div className="text-xs font-bold text-white leading-tight">
-                              {renderPreview(templateForm.pollQuestion || 'Aapka order confirm karein:')}
-                            </div>
-                            <div className="text-[10px] text-emerald-200/80">Select one</div>
-                          </div>
-                        </div>
-
-                        <div className="space-y-1.5">
-                          {templateForm.pollOptions.map((opt, i) => (
-                            <div
-                              key={i}
-                              className="p-2.5 rounded-xl bg-black/25 hover:bg-black/40 border border-emerald-700/40 transition flex items-center justify-between"
-                            >
-                              <div className="flex items-center gap-2">
-                                <div className="w-4 h-4 rounded-full border-2 border-emerald-300 flex items-center justify-center">
-                                  {i === 0 && <div className="w-2 h-2 rounded-full bg-emerald-300" />}
-                                </div>
-                                <span className="text-xs font-semibold text-white">{opt.text}</span>
-                              </div>
-                              <span
-                                className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider ${
-                                  opt.id === 'CONFIRMED'
-                                    ? 'bg-emerald-400 text-emerald-950'
-                                    : opt.id === 'CANCELLED'
-                                    ? 'bg-rose-400 text-rose-950'
-                                    : 'bg-blue-400 text-blue-950'
-                                }`}
-                              >
-                                {opt.id}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-
-                        {templateForm.pollOptions[0]?.autoReply && (
-                          <div className="pt-2 border-t border-emerald-700/50 text-[10px] text-emerald-200/90 leading-tight">
-                            <span className="font-semibold text-white block">Auto-reply for &quot;{templateForm.pollOptions[0].text}&quot;:</span>
-                            &quot;{templateForm.pollOptions[0].autoReply}&quot;
-                          </div>
-                        )}
-                        <div className="text-right text-[10px] text-emerald-200/70">12:45 PM ✓✓</div>
+                  {/* Simulated Unified Single WhatsApp Message Bubble */}
+                  <div className="bg-[#0b141a] p-4 rounded-2xl border border-[#202c33] max-w-sm mx-auto shadow-inner">
+                    <div className="bg-[#005c4b] text-[#e9edef] p-4 rounded-2xl rounded-tr-none text-xs leading-relaxed shadow-md space-y-3 border border-emerald-600/30">
+                      {/* Message Body */}
+                      <div className="whitespace-pre-wrap leading-relaxed text-slate-100">
+                        {renderPreview(templateForm.body)}
                       </div>
-                    )}
+
+                      {/* Integrated Single-Message Poll Options */}
+                      {templateForm.hasPoll && (
+                        <div className="pt-3 border-t border-emerald-600/40 space-y-2.5">
+                          {templateForm.pollQuestion && (
+                            <div className="flex items-center gap-2 pb-1.5 border-b border-emerald-600/30">
+                              <span className="text-sm">📊</span>
+                              <div className="flex-1">
+                                <div className="text-[11px] font-bold text-white leading-tight">
+                                  {renderPreview(templateForm.pollQuestion)}
+                                </div>
+                                <div className="text-[9px] text-emerald-200/80">Tap to select:</div>
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="space-y-1.5">
+                            {templateForm.pollOptions.map((opt, i) => (
+                              <div
+                                key={i}
+                                className="p-2.5 rounded-xl bg-black/25 hover:bg-black/40 border border-emerald-500/30 transition flex items-center justify-between"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <div className="w-4 h-4 rounded-full border-2 border-emerald-300 flex items-center justify-center">
+                                    {i === 0 && <div className="w-2 h-2 rounded-full bg-emerald-300" />}
+                                  </div>
+                                  <span className="text-xs font-semibold text-white">{opt.text}</span>
+                                </div>
+                                <span
+                                  className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider ${
+                                    opt.id === 'CONFIRMED'
+                                      ? 'bg-emerald-400 text-emerald-950'
+                                      : opt.id === 'CANCELLED'
+                                      ? 'bg-rose-400 text-rose-950'
+                                      : 'bg-blue-400 text-blue-950'
+                                  }`}
+                                >
+                                  {opt.id}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+
+                          {templateForm.pollOptions[0]?.autoReply && (
+                            <div className="pt-2 border-t border-emerald-600/30 text-[10px] text-emerald-200/90 leading-tight">
+                              <span className="font-semibold text-white block">
+                                Auto-reply on &quot;{templateForm.pollOptions[0].text}&quot;:
+                              </span>
+                              &quot;{templateForm.pollOptions[0].autoReply}&quot;
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      <div className="text-right text-[10px] text-emerald-200/70 pt-1">12:45 PM ✓✓</div>
+                    </div>
                   </div>
                 </div>
 

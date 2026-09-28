@@ -954,36 +954,36 @@ export class BaileysService {
           // Anti-ban delay
           await delay(delayMs);
 
-          // 1. Send order details text message
-          const textSent = await this.sock.sendMessage(jid, { text: bodyText });
-          const textWamid = textSent?.key?.id || `baileys_${Date.now()}`;
-
-          let pollWamid: string | null = null;
+          let wamid: string;
           let secretBase64: string | null = null;
-
           const hasPoll = params.hasPoll !== false;
           const pollOptions: PollOption[] = params.pollOptions || DEFAULT_POLL_OPTIONS;
 
-          // 2. If poll is enabled, send native single-select WhatsApp Poll
           if (hasPoll && pollOptions.length >= 2) {
-            await delay(600); // Polite interval between text and poll
-            const pollQuestion = params.pollQuestion || 'Aapka order confirm karein:';
+            // Send EXACTLY ONE message: The WhatsApp Poll containing the full message body + tap buttons
+            const pollQuestionText = params.pollQuestion ? String(params.pollQuestion).trim() : '';
+            const fullPollName = pollQuestionText && !bodyText.includes(pollQuestionText)
+              ? `${bodyText}\n\n${pollQuestionText}`
+              : bodyText;
+
             const pollSent = await this.sock.sendMessage(jid, {
               poll: {
-                name: pollQuestion,
+                name: fullPollName,
                 values: pollOptions.map((opt: any) => opt.text),
                 selectableCount: 1,
               },
             });
 
-            pollWamid = pollSent?.key?.id || null;
+            wamid = pollSent?.key?.id || `baileys_poll_${Date.now()}`;
             const secretBuffer = pollSent?.message?.messageContextInfo?.messageSecret;
             if (secretBuffer) {
               secretBase64 = Buffer.from(secretBuffer).toString('base64');
             }
+          } else {
+            // When poll is disabled, send standard text message only
+            const textSent = await this.sock.sendMessage(jid, { text: bodyText });
+            wamid = textSent?.key?.id || `baileys_${Date.now()}`;
           }
-
-          const primaryWamid = pollWamid || textWamid;
 
           await prisma.$transaction([
             prisma.messageJob.update({
@@ -995,7 +995,7 @@ export class BaileysService {
                 tenantId: job.tenantId,
                 orderId: job.orderId,
                 customerId: job.order.customerId,
-                wamid: primaryWamid,
+                wamid,
                 recipientPhone: job.recipientPhone,
                 direction: MessageDirection.OUTBOUND,
                 status: MessageStatus.SENT,
@@ -1005,8 +1005,7 @@ export class BaileysService {
                   hasPoll,
                   pollQuestion: params.pollQuestion,
                   pollOptions,
-                  pollWamid,
-                  textWamid,
+                  pollWamid: hasPoll ? wamid : null,
                   messageSecretBase64: secretBase64,
                 } as any,
                 sentAt: new Date(),
@@ -1019,7 +1018,7 @@ export class BaileysService {
           ]);
 
           this.log(
-            `Dispatched WhatsApp confirmation ${hasPoll ? '(Text + Poll)' : '(Text)'} to +${cleanPhone} for order ${job.order.shopifyOrderNumber}`
+            `Dispatched single WhatsApp confirmation ${hasPoll ? '(Interactive Poll)' : '(Text)'} to +${cleanPhone} for order ${job.order.shopifyOrderNumber}`
           );
         } catch (jobErr: any) {
           const maxRetries = settings.maxRetryAttempts || 3;

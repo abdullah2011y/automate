@@ -260,24 +260,30 @@ export const testSendTemplate = async (
     const sampleVars = variables || TemplateService.getSampleVariables();
     const rendered = TemplateService.render(body, sampleVars);
 
-    await BaileysService.sendDirectMessage(recipientPhone, rendered);
+    const isPoll = hasPoll !== false && Array.isArray(pollOptions) && pollOptions.length >= 2;
 
-    if (hasPoll !== false && Array.isArray(pollOptions) && pollOptions.length >= 2) {
-      const renderedPollQuestion = TemplateService.render(
-        pollQuestion || 'Aapka order confirm karein:',
-        sampleVars
-      );
-      await new Promise((r) => setTimeout(r, 600));
+    if (isPoll) {
+      const renderedPollQuestion = pollQuestion
+        ? TemplateService.render(pollQuestion, sampleVars).trim()
+        : '';
+      const fullPollName = renderedPollQuestion && !rendered.includes(renderedPollQuestion)
+        ? `${rendered}\n\n${renderedPollQuestion}`
+        : rendered;
+
+      // Send single poll message containing full text and options
       await BaileysService.sendDirectPoll(
         recipientPhone,
-        renderedPollQuestion,
+        fullPollName,
         pollOptions.map((o: any) => o.text)
       );
+    } else {
+      // Standard text message only
+      await BaileysService.sendDirectMessage(recipientPhone, rendered);
     }
 
     res.status(200).json({
       success: true,
-      message: `Test message ${hasPoll ? 'and interactive poll ' : ''}sent to ${recipientPhone}`,
+      message: `Test message ${isPoll ? '(Interactive Poll) ' : ''}sent to ${recipientPhone}`,
       data: { rendered },
     });
   } catch (error) {
