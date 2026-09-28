@@ -10,6 +10,8 @@
     "dev": "concurrently -n \"API,WEB\" -c \"cyan,magenta\" \"npm run dev:api\" \"npm run dev:web\"",
     "dev:api": "npm --prefix apps/api run dev",
     "dev:web": "npm --prefix apps/web run dev",
+    "build": "npm --prefix apps/api run build",
+    "start": "node apps/api/dist/index.js",
     "build:api": "npm --prefix apps/api run build",
     "build:web": "npm --prefix apps/web run build",
     "build:mobile": "npm --prefix apps/web run build:cap && npm --prefix apps/web run cap:sync",
