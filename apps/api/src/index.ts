@@ -78,9 +78,9 @@ app.use(config.API_PREFIX, v1Router);
 // Centralized error handling
 app.use(errorHandler);
 
-// Server startup
-const server = app.listen(config.PORT, () => {
-  console.log(`🚀 [ByteForge API] Running on port ${config.PORT} (${config.NODE_ENV})`);
+// Server startup - explicitly bind to 0.0.0.0 for container networking (Northflank/Docker)
+const server = app.listen(config.PORT, '0.0.0.0', () => {
+  console.log(`🚀 [ByteForge API] Running on port ${config.PORT} (${config.NODE_ENV}) - bound to 0.0.0.0`);
   console.log(`🔗 Health check available at: http://localhost:${config.PORT}${config.API_PREFIX}/health`);
 
   // Phase 4: Automatically initialize Baileys WhatsApp Web socket in non-test mode
