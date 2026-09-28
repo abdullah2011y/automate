@@ -524,14 +524,7 @@ export class BaileysService {
         });
       });
 
-      this.log(`Order ${targetOrder.shopifyOrderNumber} successfully updated to ${targetStatus} from WhatsApp Poll tap!`);
-
-      // Dispatch option-specific autoReply
-      if (selectedOption.autoReply && selectedOption.autoReply.trim() !== '') {
-        await this.sendDirectMessage(senderJid, selectedOption.autoReply.trim()).catch((err) => {
-          this.log(`Failed to send poll auto-reply: ${err.message}`, 'warn');
-        });
-      }
+      this.log(`Order ${targetOrder.shopifyOrderNumber} successfully updated to ${targetStatus} from WhatsApp Poll tap! (Auto-reply is fully turned OFF)`);
     } catch (err: any) {
       this.log(`Error handling inbound poll vote: ${err.message}`, 'error');
     }
@@ -735,12 +728,7 @@ export class BaileysService {
       const confirmOpt = outboundPollOpts.find((o) => o.id === 'CONFIRMED' || o.text.toLowerCase().includes('confirm'));
       const confirmReply = confirmOpt?.autoReply?.trim() || settings.successReplyText;
 
-      this.log(`Order ${targetOrder.shopifyOrderNumber} successfully CONFIRMED by customer (+${phoneDigits})`);
-      if (confirmReply) {
-        await this.sendDirectMessage(senderJid, confirmReply).catch((err) => {
-          this.log(`Failed to send confirmation auto-reply: ${err.message}`, 'warn');
-        });
-      }
+      this.log(`Order ${targetOrder.shopifyOrderNumber} successfully CONFIRMED by customer (+${phoneDigits}) (Auto-reply is fully turned OFF)`);
     } else if (isCancel) {
       await prisma.$transaction(async (tx) => {
         await tx.order.update({
@@ -783,12 +771,7 @@ export class BaileysService {
       const cancelOpt = outboundPollOpts.find((o) => o.id === 'CANCELLED' || o.text.toLowerCase().includes('cancel'));
       const cancelReply = cancelOpt?.autoReply?.trim() || settings.cancelReplyText;
 
-      this.log(`Order ${targetOrder.shopifyOrderNumber} CANCELLED by customer (+${phoneDigits})`);
-      if (cancelReply) {
-        await this.sendDirectMessage(senderJid, cancelReply).catch((err) => {
-          this.log(`Failed to send cancellation auto-reply: ${err.message}`, 'warn');
-        });
-      }
+      this.log(`Order ${targetOrder.shopifyOrderNumber} CANCELLED by customer (+${phoneDigits}) (Auto-reply is fully turned OFF)`);
     }
   }
 

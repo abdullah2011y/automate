@@ -1216,17 +1216,10 @@ Order confirm ya cancel karne ke liye neeche diye gaye button par click karein.`
                               </div>
                             </div>
 
-                            <div>
-                              <label className="block text-[11px] font-medium text-slate-400 mb-1">
-                                Individual Auto-Reply (Sent immediately upon tap)
-                              </label>
-                              <textarea
-                                rows={2}
-                                value={opt.autoReply}
-                                onChange={(e) => handleUpdatePollOption(idx, 'autoReply', e.target.value)}
-                                placeholder="e.g. Your order will be on your door step in 2-4 working days. Shukriya for confirming!"
-                                className="w-full px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-300 font-mono focus:outline-none focus:border-emerald-500"
-                              />
+                            <div className="pt-1">
+                              <span className="text-[11px] text-slate-500 italic block">
+                                ℹ️ Auto-Reply is turned OFF. Tapping this option instantly updates the order status without sending automated messages to the customer.
+                              </span>
                             </div>
                           </div>
                         ))}
@@ -1314,15 +1307,6 @@ Order confirm ya cancel karne ke liye neeche diye gaye button par click karein.`
                               </div>
                             ))}
                           </div>
-
-                          {templateForm.pollOptions[0]?.autoReply && (
-                            <div className="pt-2 border-t border-emerald-600/30 text-[10px] text-emerald-200/90 leading-tight">
-                              <span className="font-semibold text-white block">
-                                Auto-reply on &quot;{templateForm.pollOptions[0].text}&quot;:
-                              </span>
-                              &quot;{templateForm.pollOptions[0].autoReply}&quot;
-                            </div>
-                          )}
                         </div>
                       )}
 
