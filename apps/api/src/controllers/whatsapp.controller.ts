@@ -118,6 +118,11 @@ export const resendConfirmation = async (
 // -------------------------------------------------------------
 // Message Template Management Endpoints
 // -------------------------------------------------------------
+const pollOptionSchema = z.object({
+  id: z.string().min(1),
+  text: z.string().min(1),
+  autoReply: z.string().optional().default(''),
+});
 
 const templateCreateSchema = z.object({
   name: z.string().min(2, 'Template name must be at least 2 characters'),
@@ -126,6 +131,9 @@ const templateCreateSchema = z.object({
   event: z.string().default('ORDER_CONFIRMATION'),
   isDefault: z.boolean().optional(),
   isEnabled: z.boolean().optional(),
+  hasPoll: z.boolean().optional(),
+  pollQuestion: z.string().optional(),
+  pollOptions: z.array(pollOptionSchema).optional(),
 });
 
 const templateUpdateSchema = z.object({
@@ -135,6 +143,9 @@ const templateUpdateSchema = z.object({
   event: z.string().optional(),
   isDefault: z.boolean().optional(),
   isEnabled: z.boolean().optional(),
+  hasPoll: z.boolean().optional(),
+  pollQuestion: z.string().optional(),
+  pollOptions: z.array(pollOptionSchema).optional(),
 });
 
 export const listTemplates = async (
@@ -228,7 +239,7 @@ export const testSendTemplate = async (
 ): Promise<void> => {
   try {
     const tenantId = req.tenantId!;
-    const { body, recipientPhone, variables, confirmed } = req.body;
+    const { body, recipientPhone, variables, confirmed, hasPoll, pollQuestion, pollOptions } = req.body;
     if (!body) throw new AppError('Template body is required', 400);
     if (!recipientPhone) throw new AppError('Recipient phone number is required', 400);
 
@@ -250,9 +261,23 @@ export const testSendTemplate = async (
     const rendered = TemplateService.render(body, sampleVars);
 
     await BaileysService.sendDirectMessage(recipientPhone, rendered);
+
+    if (hasPoll !== false && Array.isArray(pollOptions) && pollOptions.length >= 2) {
+      const renderedPollQuestion = TemplateService.render(
+        pollQuestion || 'Aapka order confirm karein:',
+        sampleVars
+      );
+      await new Promise((r) => setTimeout(r, 600));
+      await BaileysService.sendDirectPoll(
+        recipientPhone,
+        renderedPollQuestion,
+        pollOptions.map((o: any) => o.text)
+      );
+    }
+
     res.status(200).json({
       success: true,
-      message: `Test message sent to ${recipientPhone}`,
+      message: `Test message ${hasPoll ? 'and interactive poll ' : ''}sent to ${recipientPhone}`,
       data: { rendered },
     });
   } catch (error) {

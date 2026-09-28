@@ -362,6 +362,9 @@ model MessageTemplate {
   isDefault   Boolean  @default(false)
   isActive    Boolean  @default(true)
   variables   String[] @default(["customer_name", "store_name", "order_number", "order_total", "currency"])
+  hasPoll     Boolean  @default(true)
+  pollQuestion String? @default("Aapka order {{order_number}} confirm karein:")
+  pollOptions Json?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

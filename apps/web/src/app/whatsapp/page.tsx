@@ -35,6 +35,7 @@ import {
   api,
   BaileysConnectionStatus,
   MessageTemplate,
+  PollOption,
   AutomationSettings,
   WhatsAppMessageRecord,
 } from '@/lib/api';
@@ -111,6 +112,20 @@ function WhatsAppContent() {
     body: '',
     isDefault: false,
     isEnabled: true,
+    hasPoll: true,
+    pollQuestion: 'Aapka order {{order_number}} confirm karein:',
+    pollOptions: [
+      {
+        id: 'CONFIRMED',
+        text: 'Yes Confirmed ✔',
+        autoReply: 'Your order will be on your door step in 2-4 working days. Shukriya for confirming!',
+      },
+      {
+        id: 'CANCELLED',
+        text: 'No Cancelled ❌',
+        autoReply: 'Aapka order cancel kar diya gaya hai. Agle baar khidmat ka moqa zaroor dijiyega!',
+      },
+    ] as PollOption[],
   });
   const [previewVars, setPreviewVars] = useState<Record<string, string>>({
     customer_name: 'Muhammad Ali',
@@ -298,10 +313,23 @@ Aapka order {{order_number}} receive ho gaya hai.
 
 Order total: Rs. {{order_total}}
 
-Order confirm karne ke liye CONFIRM reply karein.
-Cancel karne ke liye CANCEL reply karein.`,
+Order confirm ya cancel karne ke liye neeche diye gaye button par click karein.`,
       isDefault: false,
       isEnabled: true,
+      hasPoll: true,
+      pollQuestion: 'Aapka order {{order_number}} confirm karein:',
+      pollOptions: [
+        {
+          id: 'CONFIRMED',
+          text: 'Yes Confirmed ✔',
+          autoReply: 'Your order will be on your door step in 2-4 working days. Shukriya for confirming!',
+        },
+        {
+          id: 'CANCELLED',
+          text: 'No Cancelled ❌',
+          autoReply: 'Aapka order cancel kar diya gaya hai. Agle baar khidmat ka moqa zaroor dijiyega!',
+        },
+      ],
     });
     setIsTemplateModalOpen(true);
   };
@@ -316,8 +344,54 @@ Cancel karne ke liye CANCEL reply karein.`,
       body: tmpl.body || '',
       isDefault: Boolean(tmpl.isDefault),
       isEnabled: tmpl.isActive !== undefined ? Boolean(tmpl.isActive) : true,
+      hasPoll: tmpl.hasPoll !== undefined ? Boolean(tmpl.hasPoll) : true,
+      pollQuestion: tmpl.pollQuestion || 'Aapka order {{order_number}} confirm karein:',
+      pollOptions: Array.isArray(tmpl.pollOptions) && tmpl.pollOptions.length > 0
+        ? tmpl.pollOptions
+        : [
+            {
+              id: 'CONFIRMED',
+              text: 'Yes Confirmed ✔',
+              autoReply: 'Your order will be on your door step in 2-4 working days. Shukriya for confirming!',
+            },
+            {
+              id: 'CANCELLED',
+              text: 'No Cancelled ❌',
+              autoReply: 'Aapka order cancel kar diya gaya hai. Agle baar khidmat ka moqa zaroor dijiyega!',
+            },
+          ],
     });
     setIsTemplateModalOpen(true);
+  };
+
+  const handleAddPollOption = () => {
+    const nextIdx = templateForm.pollOptions.length + 1;
+    setTemplateForm({
+      ...templateForm,
+      pollOptions: [
+        ...templateForm.pollOptions,
+        {
+          id: 'CONFIRMED',
+          text: `Option ${nextIdx}`,
+          autoReply: 'Aapka response receive ho gaya hai. Shukriya!',
+        },
+      ],
+    });
+  };
+
+  const handleUpdatePollOption = (index: number, field: keyof PollOption, value: string) => {
+    const updated = [...templateForm.pollOptions];
+    updated[index] = { ...updated[index], [field]: value };
+    setTemplateForm({ ...templateForm, pollOptions: updated });
+  };
+
+  const handleRemovePollOption = (index: number) => {
+    if (templateForm.pollOptions.length <= 1) {
+      alert('At least 1 poll option is required');
+      return;
+    }
+    const updated = templateForm.pollOptions.filter((_, i) => i !== index);
+    setTemplateForm({ ...templateForm, pollOptions: updated });
   };
 
   const handleSaveTemplate = async (e: React.FormEvent) => {
@@ -331,6 +405,9 @@ Cancel karne ke liye CANCEL reply karein.`,
           body: templateForm.body,
           isDefault: templateForm.isDefault,
           isActive: templateForm.isEnabled,
+          hasPoll: templateForm.hasPoll,
+          pollQuestion: templateForm.pollQuestion,
+          pollOptions: templateForm.pollOptions,
         });
         setActionMessage({ type: 'success', text: 'Template updated successfully!' });
       } else {
@@ -341,6 +418,9 @@ Cancel karne ke liye CANCEL reply karein.`,
           body: templateForm.body,
           isDefault: templateForm.isDefault,
           isEnabled: templateForm.isEnabled,
+          hasPoll: templateForm.hasPoll,
+          pollQuestion: templateForm.pollQuestion,
+          pollOptions: templateForm.pollOptions,
         });
         setActionMessage({ type: 'success', text: 'Template created successfully!' });
       }
@@ -369,7 +449,16 @@ Cancel karne ke liye CANCEL reply karein.`,
     }
     setIsTestingTemplate(true);
     try {
-      const res = await api.testSendTemplate(templateForm.body, testPhone.trim(), previewVars);
+      const res = await api.testSendTemplate(
+        templateForm.body,
+        testPhone.trim(),
+        previewVars,
+        {
+          hasPoll: templateForm.hasPoll,
+          pollQuestion: templateForm.pollQuestion,
+          pollOptions: templateForm.pollOptions,
+        }
+      );
       alert(res.message || 'Test message sent successfully');
     } catch (err: any) {
       alert(err?.message || 'Failed to send test message');
@@ -857,7 +946,7 @@ Cancel karne ke liye CANCEL reply karein.`,
                       {tmpl.body}
                     </div>
 
-                    <div className="flex flex-wrap gap-1.5 mb-4">
+                    <div className="flex flex-wrap gap-1.5 mb-3">
                       {(tmpl.variables || []).map((v, i) => (
                         <span
                           key={i}
@@ -867,6 +956,39 @@ Cancel karne ke liye CANCEL reply karein.`,
                         </span>
                       ))}
                     </div>
+
+                    {tmpl.hasPoll && (
+                      <div className="p-3 bg-slate-950/70 border border-emerald-900/30 rounded-xl space-y-2 mb-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+                            <Activity className="w-3.5 h-3.5" />
+                            WhatsApp Poll ({Array.isArray(tmpl.pollOptions) ? tmpl.pollOptions.length : 2} Options)
+                          </span>
+                          <span className="text-[10px] font-mono text-slate-400 truncate max-w-[180px]">
+                            {tmpl.pollQuestion || 'Confirmation Poll'}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                          {((Array.isArray(tmpl.pollOptions) && tmpl.pollOptions.length > 0 ? tmpl.pollOptions : [
+                            { id: 'CONFIRMED', text: 'Yes Confirmed ✔' },
+                            { id: 'CANCELLED', text: 'No Cancelled ❌' }
+                          ]) as any[]).map((opt, oIdx) => (
+                            <div key={oIdx} className="px-2.5 py-1.5 bg-slate-900/90 border border-slate-800 rounded-lg text-[11px] flex items-center justify-between gap-1">
+                              <span className="font-semibold text-slate-200 truncate">{opt.text}</span>
+                              <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider flex-shrink-0 ${
+                                opt.id === 'CONFIRMED'
+                                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                                  : opt.id === 'CANCELLED'
+                                  ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                                  : 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                              }`}>
+                                {opt.id}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <div className="flex items-center justify-end gap-2 pt-4 border-t border-slate-800">
@@ -981,6 +1103,138 @@ Cancel karne ke liye CANCEL reply karein.`,
                   </div>
                 </div>
 
+                {/* WhatsApp Poll Options Builder */}
+                <div className="p-4 bg-slate-950/80 border border-emerald-900/40 rounded-xl space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-center">
+                        <Activity className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <span className="text-xs font-bold text-white block">
+                          Interactive WhatsApp Poll (Tap Buttons)
+                        </span>
+                        <span className="text-[11px] text-slate-400">
+                          Send native WhatsApp single-select poll. Customer tap instantly updates order status and sends auto-reply.
+                        </span>
+                      </div>
+                    </div>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={templateForm.hasPoll}
+                        onChange={(e) => setTemplateForm({ ...templateForm, hasPoll: e.target.checked })}
+                        className="rounded bg-slate-800 border-slate-700 text-emerald-500 focus:ring-0"
+                      />
+                      <span className="text-xs font-semibold text-emerald-400">Enable Poll</span>
+                    </label>
+                  </div>
+
+                  {templateForm.hasPoll && (
+                    <div className="space-y-4 pt-2 border-t border-slate-800">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-300 mb-1">
+                          Poll Question / Prompt
+                        </label>
+                        <input
+                          type="text"
+                          value={templateForm.pollQuestion}
+                          onChange={(e) => setTemplateForm({ ...templateForm, pollQuestion: e.target.value })}
+                          placeholder="e.g. Aapka order {{order_number}} confirm karein:"
+                          className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500"
+                        />
+                      </div>
+
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <label className="block text-xs font-bold text-slate-300">
+                            Poll Options ({templateForm.pollOptions.length}) & Order Status Mappings
+                          </label>
+                          <button
+                            type="button"
+                            onClick={handleAddPollOption}
+                            className="px-2.5 py-1 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/30 rounded-lg text-xs font-semibold transition flex items-center gap-1"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            Add Option (Poll)
+                          </button>
+                        </div>
+
+                        {templateForm.pollOptions.map((opt, idx) => (
+                          <div
+                            key={idx}
+                            className="p-3.5 bg-slate-900/90 border border-slate-800 rounded-xl space-y-3"
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                                <span className="w-5 h-5 rounded-full bg-slate-800 text-slate-300 flex items-center justify-center text-[10px]">
+                                  {idx + 1}
+                                </span>
+                                Poll Option #{idx + 1}
+                              </span>
+                              {templateForm.pollOptions.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemovePollOption(idx)}
+                                  className="text-slate-500 hover:text-rose-400 text-xs transition p-1"
+                                  title="Delete option"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              <div>
+                                <label className="block text-[11px] font-medium text-slate-400 mb-1">
+                                  Option Display Text (WhatsApp)
+                                </label>
+                                <input
+                                  type="text"
+                                  required
+                                  value={opt.text}
+                                  onChange={(e) => handleUpdatePollOption(idx, 'text', e.target.value)}
+                                  placeholder="e.g. Yes Confirmed ✔"
+                                  className="w-full px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white focus:outline-none focus:border-emerald-500"
+                                />
+                              </div>
+
+                              <div>
+                                <label className="block text-[11px] font-medium text-slate-400 mb-1">
+                                  Target Status on Tap (Orders Section)
+                                </label>
+                                <select
+                                  value={opt.id}
+                                  onChange={(e) => handleUpdatePollOption(idx, 'id', e.target.value)}
+                                  className="w-full px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-xs text-emerald-400 font-semibold focus:outline-none focus:border-emerald-500"
+                                >
+                                  <option value="CONFIRMED">CONFIRMED (Mark Confirmed)</option>
+                                  <option value="CANCELLED">CANCELLED (Mark Cancelled)</option>
+                                  <option value="PROCESSING">PROCESSING (Mark Processing)</option>
+                                  <option value="PENDING_CONFIRMATION">PENDING_CONFIRMATION (Keep Pending)</option>
+                                </select>
+                              </div>
+                            </div>
+
+                            <div>
+                              <label className="block text-[11px] font-medium text-slate-400 mb-1">
+                                Individual Auto-Reply (Sent immediately upon tap)
+                              </label>
+                              <textarea
+                                rows={2}
+                                value={opt.autoReply}
+                                onChange={(e) => handleUpdatePollOption(idx, 'autoReply', e.target.value)}
+                                placeholder="e.g. Your order will be on your door step in 2-4 working days. Shukriya for confirming!"
+                                className="w-full px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-300 font-mono focus:outline-none focus:border-emerald-500"
+                              />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 <div className="flex items-center gap-6 pt-2">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
@@ -1012,11 +1266,61 @@ Cancel karne ke liye CANCEL reply karein.`,
                   </h4>
 
                   {/* Simulated WhatsApp Bubble */}
-                  <div className="bg-[#0b141a] p-4 rounded-2xl border border-[#202c33] max-w-sm mx-auto shadow-inner">
+                  <div className="bg-[#0b141a] p-4 rounded-2xl border border-[#202c33] max-w-sm mx-auto shadow-inner space-y-3">
                     <div className="bg-[#005c4b] text-[#e9edef] p-3.5 rounded-2xl rounded-tr-none text-xs leading-relaxed whitespace-pre-wrap shadow-md">
                       {renderPreview(templateForm.body)}
                       <div className="text-right text-[10px] text-[#8696a0] mt-1.5">12:45 PM ✓✓</div>
                     </div>
+
+                    {/* Simulated Native WhatsApp Poll Card */}
+                    {templateForm.hasPoll && (
+                      <div className="bg-[#005c4b]/90 text-[#e9edef] p-3.5 rounded-2xl rounded-tr-none border border-emerald-600/40 shadow-md space-y-2.5">
+                        <div className="flex items-center gap-2 pb-2 border-b border-emerald-700/50">
+                          <span className="text-base">📊</span>
+                          <div>
+                            <div className="text-xs font-bold text-white leading-tight">
+                              {renderPreview(templateForm.pollQuestion || 'Aapka order confirm karein:')}
+                            </div>
+                            <div className="text-[10px] text-emerald-200/80">Select one</div>
+                          </div>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          {templateForm.pollOptions.map((opt, i) => (
+                            <div
+                              key={i}
+                              className="p-2.5 rounded-xl bg-black/25 hover:bg-black/40 border border-emerald-700/40 transition flex items-center justify-between"
+                            >
+                              <div className="flex items-center gap-2">
+                                <div className="w-4 h-4 rounded-full border-2 border-emerald-300 flex items-center justify-center">
+                                  {i === 0 && <div className="w-2 h-2 rounded-full bg-emerald-300" />}
+                                </div>
+                                <span className="text-xs font-semibold text-white">{opt.text}</span>
+                              </div>
+                              <span
+                                className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider ${
+                                  opt.id === 'CONFIRMED'
+                                    ? 'bg-emerald-400 text-emerald-950'
+                                    : opt.id === 'CANCELLED'
+                                    ? 'bg-rose-400 text-rose-950'
+                                    : 'bg-blue-400 text-blue-950'
+                                }`}
+                              >
+                                {opt.id}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+
+                        {templateForm.pollOptions[0]?.autoReply && (
+                          <div className="pt-2 border-t border-emerald-700/50 text-[10px] text-emerald-200/90 leading-tight">
+                            <span className="font-semibold text-white block">Auto-reply for &quot;{templateForm.pollOptions[0].text}&quot;:</span>
+                            &quot;{templateForm.pollOptions[0].autoReply}&quot;
+                          </div>
+                        )}
+                        <div className="text-right text-[10px] text-emerald-200/70">12:45 PM ✓✓</div>
+                      </div>
+                    )}
                   </div>
                 </div>
 

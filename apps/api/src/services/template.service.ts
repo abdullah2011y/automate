@@ -15,6 +15,25 @@ export interface TemplateVariables {
   [key: string]: string | undefined;
 }
 
+export interface PollOption {
+  id: string; // Target order status: 'CONFIRMED' | 'CANCELLED' | 'PENDING_CONFIRMATION' | 'PROCESSING', etc.
+  text: string; // Option text displayed on WhatsApp e.g. 'Yes Confirmed ✔'
+  autoReply: string; // Auto-reply message sent to customer
+}
+
+export const DEFAULT_POLL_OPTIONS: PollOption[] = [
+  {
+    id: 'CONFIRMED',
+    text: 'Yes Confirmed ✔',
+    autoReply: 'Your order will be on your door step in 2-4 working days. Shukriya for confirming!',
+  },
+  {
+    id: 'CANCELLED',
+    text: 'No Cancelled ❌',
+    autoReply: 'Aapka order cancel kar diya gaya hai. Agle baar khidmat ka moqa zaroor dijiyega!',
+  },
+];
+
 export const DEFAULT_CONFIRMATION_TEMPLATE = `Assalam-o-Alaikum {{customer_name}}!
 
 Thank you for shopping with {{store_name}}.
@@ -23,9 +42,7 @@ Aapka order {{order_number}} receive ho gaya hai.
 
 Order total: Rs. {{order_total}}
 
-Order confirm karne ke liye CONFIRM reply karein.
-
-Cancel karne ke liye CANCEL reply karein.`;
+Order confirm ya cancel karne ke liye neeche button par click karein.`;
 
 export class TemplateService {
   /**
@@ -78,7 +95,7 @@ export class TemplateService {
         data: {
           tenantId: tenantId || null,
           name: 'Default Cash on Delivery Confirmation (Urdu/English)',
-          description: 'Standard bilingual COD confirmation message with CONFIRM and CANCEL keyword instructions',
+          description: 'Standard bilingual COD confirmation message with interactive WhatsApp Poll options',
           event: 'ORDER_CONFIRMATION',
           body: DEFAULT_CONFIRMATION_TEMPLATE,
           isDefault: true,
@@ -91,6 +108,18 @@ export class TemplateService {
             'currency',
             'payment_method',
           ],
+          hasPoll: true,
+          pollQuestion: 'Aapka order {{order_number}} confirm karein:',
+          pollOptions: DEFAULT_POLL_OPTIONS as any,
+        },
+      });
+    } else if (!existing.pollOptions) {
+      await prisma.messageTemplate.update({
+        where: { id: existing.id },
+        data: {
+          hasPoll: true,
+          pollQuestion: existing.pollQuestion || 'Aapka order {{order_number}} confirm karein:',
+          pollOptions: DEFAULT_POLL_OPTIONS as any,
         },
       });
     }
@@ -121,6 +150,25 @@ export class TemplateService {
   }
 
   /**
+   * Retrieves the default template for an event.
+   */
+  public static async getDefaultTemplate(event = 'ORDER_CONFIRMATION') {
+    await this.ensureDefaultTemplates();
+    const template = await prisma.messageTemplate.findFirst({
+      where: { event, isDefault: true, isActive: true },
+    });
+    if (!template) {
+      const fallback = await prisma.messageTemplate.findFirst({
+        where: { event, isActive: true },
+        orderBy: { createdAt: 'asc' },
+      });
+      if (fallback) return fallback;
+      throw new AppError(`No active template found for event ${event}`, 404);
+    }
+    return template;
+  }
+
+  /**
    * Creates a new message template.
    */
   public static async createTemplate(data: {
@@ -131,6 +179,9 @@ export class TemplateService {
     body: string;
     isDefault?: boolean;
     variables?: string[];
+    hasPoll?: boolean;
+    pollQuestion?: string;
+    pollOptions?: PollOption[];
   }) {
     if (!data.name || data.name.trim().length === 0) {
       throw new AppError('Template name is required', 400);
@@ -163,6 +214,9 @@ export class TemplateService {
           'order_total',
           'currency',
         ],
+        hasPoll: data.hasPoll ?? true,
+        pollQuestion: data.pollQuestion?.trim() || 'Aapka order {{order_number}} confirm karein:',
+        pollOptions: (data.pollOptions || DEFAULT_POLL_OPTIONS) as any,
       },
     });
   }
@@ -179,6 +233,9 @@ export class TemplateService {
       isActive?: boolean;
       isDefault?: boolean;
       event?: string;
+      hasPoll?: boolean;
+      pollQuestion?: string;
+      pollOptions?: PollOption[];
     }
   ) {
     const existing = await this.getTemplateById(id);
@@ -199,6 +256,9 @@ export class TemplateService {
         isActive: data.isActive !== undefined ? data.isActive : undefined,
         isDefault: data.isDefault !== undefined ? data.isDefault : undefined,
         event: data.event !== undefined ? data.event : undefined,
+        hasPoll: data.hasPoll !== undefined ? data.hasPoll : undefined,
+        pollQuestion: data.pollQuestion !== undefined ? data.pollQuestion.trim() : undefined,
+        pollOptions: data.pollOptions !== undefined ? (data.pollOptions as any) : undefined,
       },
     });
   }
@@ -218,37 +278,6 @@ export class TemplateService {
     return { success: true, message: 'Template deleted successfully' };
   }
 
-  /**
-   * Resolves the default template for an event.
-   */
-  public static async getDefaultTemplate(event = 'ORDER_CONFIRMATION') {
-    const defaultTemplate = await prisma.messageTemplate.findFirst({
-      where: { event, isDefault: true, isActive: true },
-    });
-
-    if (defaultTemplate) {
-      return defaultTemplate;
-    }
-
-    const fallback = await prisma.messageTemplate.findFirst({
-      where: { event, isActive: true },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    if (fallback) {
-      return fallback;
-    }
-
-    return {
-      id: 'hardcoded_default',
-      name: 'Default Confirmation Template',
-      body: DEFAULT_CONFIRMATION_TEMPLATE,
-      event: 'ORDER_CONFIRMATION',
-      isDefault: true,
-      isActive: true,
-      variables: ['customer_name', 'store_name', 'order_number', 'order_total', 'currency'],
-    };
-  }
 
   /**
    * Provides sample values for template preview and test sends.

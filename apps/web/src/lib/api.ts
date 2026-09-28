@@ -391,6 +391,9 @@ export const api = {
     event?: string;
     isDefault?: boolean;
     isEnabled?: boolean;
+    hasPoll?: boolean;
+    pollQuestion?: string;
+    pollOptions?: PollOption[];
   }): Promise<{ success: boolean; data: MessageTemplate; message: string }> => {
     const res = await request<any>('/whatsapp/templates', {
       method: 'POST',
@@ -412,6 +415,9 @@ export const api = {
       event?: string;
       isDefault?: boolean;
       isActive?: boolean;
+      hasPoll?: boolean;
+      pollQuestion?: string;
+      pollOptions?: PollOption[];
     }
   ): Promise<{ success: boolean; data: MessageTemplate; message: string }> => {
     const res = await request<any>(`/whatsapp/templates/${id}`, {
@@ -459,11 +465,24 @@ export const api = {
   testSendTemplate: async (
     body: string,
     recipientPhone: string,
-    variables?: Record<string, string>
+    variables?: Record<string, string>,
+    pollData?: {
+      hasPoll?: boolean;
+      pollQuestion?: string;
+      pollOptions?: PollOption[];
+    }
   ): Promise<{ success: boolean; message: string; data: { rendered: string } }> => {
     const res = await request<any>('/whatsapp/templates/test-send', {
       method: 'POST',
-      body: JSON.stringify({ body, recipientPhone, variables, confirmed: true }),
+      body: JSON.stringify({
+        body,
+        recipientPhone,
+        variables,
+        confirmed: true,
+        hasPoll: pollData?.hasPoll,
+        pollQuestion: pollData?.pollQuestion,
+        pollOptions: pollData?.pollOptions,
+      }),
     });
     return {
       success: true,
@@ -543,6 +562,12 @@ export interface BaileysConnectionStatus {
   logs: Array<{ time: string; message: string; level: 'info' | 'warn' | 'error' }>;
 }
 
+export interface PollOption {
+  id: string; // Target order status: 'CONFIRMED' | 'CANCELLED' | 'PENDING_CONFIRMATION' | 'PROCESSING', etc.
+  text: string; // Option text displayed on WhatsApp e.g. 'Yes Confirmed ✔'
+  autoReply: string; // Auto-reply message sent to customer
+}
+
 export interface MessageTemplate {
   id: string;
   name: string;
@@ -552,6 +577,9 @@ export interface MessageTemplate {
   isDefault: boolean;
   isActive: boolean;
   variables: string[];
+  hasPoll: boolean;
+  pollQuestion: string | null;
+  pollOptions: PollOption[];
   createdAt: string;
   updatedAt: string;
 }

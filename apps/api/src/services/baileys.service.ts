@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import makeWASocket, {
   DisconnectReason,
   jidNormalizedUser,
@@ -5,13 +6,14 @@ import makeWASocket, {
   proto,
   delay,
   Browsers,
+  decryptPollVote,
 } from '@whiskeysockets/baileys';
 import pino from 'pino';
 import qrcode from 'qrcode';
 import { Response } from 'express';
 import { prisma } from '../db/prisma';
 import { usePostgresAuthState } from './baileys-auth.service';
-import { TemplateService } from './template.service';
+import { TemplateService, PollOption, DEFAULT_POLL_OPTIONS } from './template.service';
 import { AutomationService } from './automation.service';
 import {
   JobStatus,
@@ -175,7 +177,7 @@ export class BaileysService {
       // 2. Credentials Updates
       this.sock.ev.on('creds.update', saveCreds);
 
-      // 3. Inbound Customer Messages Listener (CONFIRM / CANCEL)
+      // 3. Inbound Customer Messages Listener (CONFIRM / CANCEL / POLL VOTES)
       this.sock.ev.on('messages.upsert', async ({ messages, type }) => {
         if (type !== 'notify') return;
 
@@ -183,6 +185,12 @@ export class BaileysService {
           if (!msg.message || msg.key.fromMe) continue;
           const senderJid = msg.key.remoteJid;
           if (!senderJid || senderJid.endsWith('@g.us') || senderJid === 'status@broadcast') continue;
+
+          // Check if message is a native WhatsApp Poll vote update
+          if (msg.message?.pollUpdateMessage) {
+            await this.handleInboundPollVote(msg);
+            continue;
+          }
 
           await this.handleInboundCustomerMessage(msg);
         }
@@ -308,6 +316,206 @@ export class BaileysService {
       uptimeSeconds: uptime,
       logs: this.logs,
     };
+  }
+
+  /**
+   * Handles inbound poll vote interactions from customer.
+   * Decrypts voter choice using stored messageSecret and updates order status.
+   */
+  public static async handleInboundPollVote(msg: proto.IWebMessageInfo) {
+    try {
+      const pollUpdate = msg.message?.pollUpdateMessage;
+      if (!pollUpdate || !pollUpdate.vote || !pollUpdate.pollCreationMessageKey) return;
+
+      const creationKey = pollUpdate.pollCreationMessageKey;
+      const pollMsgId = creationKey.id;
+      const senderJid = msg.key.remoteJid!;
+      const phoneDigits = senderJid.split('@')[0].replace(/\D/g, '');
+      const phoneSuffix = phoneDigits.slice(-10);
+
+      this.log(`Received poll vote from +${phoneDigits} for poll message ID: ${pollMsgId}`);
+
+      // Locate original outbound WhatsAppMessage that contained the poll
+      let dbMsg = await prisma.whatsAppMessage.findFirst({
+        where: {
+          OR: [
+            ...(pollMsgId ? [{ wamid: pollMsgId }] : []),
+            ...(pollMsgId ? [{ payload: { path: ['pollWamid'], equals: pollMsgId } }] : []),
+          ],
+        },
+        include: { order: true },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      // Fallback: search by customer phone number and pending confirmation order
+      if (!dbMsg || !dbMsg.order) {
+        dbMsg = await prisma.whatsAppMessage.findFirst({
+          where: {
+            recipientPhone: { contains: phoneSuffix },
+            direction: MessageDirection.OUTBOUND,
+            order: {
+              confirmationStatus: OrderConfirmationStatus.PENDING_CONFIRMATION,
+            },
+          },
+          include: { order: true },
+          orderBy: { createdAt: 'desc' },
+        });
+      }
+
+      if (!dbMsg || !dbMsg.order) {
+        this.log(`No active order found matching poll vote from +${phoneDigits}`, 'warn');
+        return;
+      }
+
+      const payload = (dbMsg.payload as any) || {};
+      const secretBase64 = payload.messageSecretBase64;
+      const pollOptions: PollOption[] = Array.isArray(payload.pollOptions) && payload.pollOptions.length > 0
+        ? payload.pollOptions
+        : DEFAULT_POLL_OPTIONS;
+
+      let selectedOption: PollOption | null = null;
+
+      if (secretBase64 && this.sock) {
+        try {
+          const meIdNormalised = jidNormalizedUser(this.sock.user?.id || '');
+          const pollCreatorJid = creationKey.fromMe
+            ? meIdNormalised
+            : (creationKey.participant || creationKey.remoteJid || meIdNormalised);
+          const voterJid = msg.key.fromMe
+            ? meIdNormalised
+            : (msg.key.participant || msg.key.remoteJid || `${phoneDigits}@s.whatsapp.net`);
+
+          const decryptedVote = decryptPollVote(
+            pollUpdate.vote,
+            {
+              pollEncKey: Buffer.from(secretBase64, 'base64'),
+              pollCreatorJid,
+              pollMsgId: pollMsgId || creationKey.id || '',
+              voterJid,
+            }
+          );
+
+          const selectedBuffers = decryptedVote.selectedOptions || [];
+          if (selectedBuffers.length === 0) {
+            this.log(`Customer +${phoneDigits} unselected/cleared poll choice.`);
+            return;
+          }
+
+          const selectedBuffer = Buffer.from(selectedBuffers[0]);
+
+          for (const opt of pollOptions) {
+            const hash = crypto.createHash('sha256').update(Buffer.from(opt.text)).digest();
+            if (selectedBuffer.equals(hash)) {
+              selectedOption = opt;
+              break;
+            }
+          }
+        } catch (decryptErr: any) {
+          this.log(`Decryption error for poll vote: ${decryptErr.message}`, 'error');
+        }
+      }
+
+      // Fallback: If decryption could not match, default to first option
+      if (!selectedOption && pollOptions.length > 0) {
+        this.log(`Could not directly map option hash, defaulting to first option for +${phoneDigits}`, 'warn');
+        selectedOption = pollOptions[0];
+      }
+
+      if (!selectedOption) return;
+
+      this.log(`Customer +${phoneDigits} tapped poll option: "${selectedOption.text}" (Status ID: ${selectedOption.id})`);
+
+      const targetOrder = dbMsg.order;
+      const tenantId = dbMsg.tenantId;
+      const now = new Date();
+
+      // Determine target confirmation status from option.id
+      let targetStatus: OrderConfirmationStatus = OrderConfirmationStatus.CONFIRMED;
+      const upperStatus = selectedOption.id.toUpperCase();
+      if (upperStatus === 'CANCELLED' || upperStatus === 'CANCEL') {
+        targetStatus = OrderConfirmationStatus.CANCELLED;
+      } else if (upperStatus === 'CONFIRMED' || upperStatus === 'CONFIRM') {
+        targetStatus = OrderConfirmationStatus.CONFIRMED;
+      } else if (Object.values(OrderConfirmationStatus).includes(upperStatus as OrderConfirmationStatus)) {
+        targetStatus = upperStatus as OrderConfirmationStatus;
+      }
+
+      await prisma.$transaction(async (tx) => {
+        const updateData: any = {
+          confirmationStatus: targetStatus,
+          statusChangedAt: now,
+        };
+
+        if (targetStatus === OrderConfirmationStatus.CONFIRMED) {
+          updateData.confirmedAt = now;
+        } else if (targetStatus === OrderConfirmationStatus.CANCELLED) {
+          updateData.cancelledAt = now;
+          updateData.cancellationReason = `Customer tapped "${selectedOption!.text}" in WhatsApp Poll`;
+        }
+
+        await tx.order.update({
+          where: { id: targetOrder.id },
+          data: updateData,
+        });
+
+        await tx.whatsAppMessage.updateMany({
+          where: { orderId: targetOrder.id, direction: MessageDirection.OUTBOUND },
+          data: {
+            customerResponse: selectedOption!.text,
+            respondedAt: now,
+          },
+        });
+
+        // Record inbound vote as a WhatsAppMessage
+        await tx.whatsAppMessage.create({
+          data: {
+            tenantId,
+            orderId: targetOrder.id,
+            customerId: targetOrder.customerId,
+            wamid: msg.key.id || `baileys_vote_${Date.now()}`,
+            recipientPhone: phoneDigits,
+            direction: MessageDirection.INBOUND,
+            status: MessageStatus.READ,
+            messageType: 'poll_vote',
+            payload: {
+              selectedOption: selectedOption!.text,
+              statusId: selectedOption!.id,
+              pollMsgId,
+            },
+            sentAt: now,
+          },
+        });
+
+        await tx.auditLog.create({
+          data: {
+            tenantId,
+            orderId: targetOrder.id,
+            action: targetStatus === OrderConfirmationStatus.CONFIRMED
+              ? 'WHATSAPP_ORDER_CONFIRMED'
+              : targetStatus === OrderConfirmationStatus.CANCELLED
+              ? 'WHATSAPP_ORDER_CANCELLED'
+              : 'WHATSAPP_ORDER_STATUS_UPDATED',
+            details: {
+              source: 'WHATSAPP_POLL',
+              selectedOptionText: selectedOption!.text,
+              statusId: selectedOption!.id,
+              targetStatus,
+            },
+          },
+        });
+      });
+
+      this.log(`Order ${targetOrder.shopifyOrderNumber} successfully updated to ${targetStatus} from WhatsApp Poll tap!`);
+
+      // Dispatch option-specific autoReply
+      if (selectedOption.autoReply && selectedOption.autoReply.trim() !== '') {
+        await this.sendDirectMessage(senderJid, selectedOption.autoReply.trim()).catch((err) => {
+          this.log(`Failed to send poll auto-reply: ${err.message}`, 'warn');
+        });
+      }
+    } catch (err: any) {
+      this.log(`Error handling inbound poll vote: ${err.message}`, 'error');
+    }
   }
 
   /**
@@ -498,9 +706,19 @@ export class BaileysService {
         });
       });
 
+      // Find if outbound message has an option-specific auto-reply
+      const latestOutbound = await prisma.whatsAppMessage.findFirst({
+        where: { orderId: targetOrder.id, direction: MessageDirection.OUTBOUND },
+        orderBy: { createdAt: 'desc' },
+      });
+      const outboundPayload = (latestOutbound?.payload as any) || {};
+      const outboundPollOpts: PollOption[] = outboundPayload.pollOptions || [];
+      const confirmOpt = outboundPollOpts.find((o) => o.id === 'CONFIRMED' || o.text.toLowerCase().includes('confirm'));
+      const confirmReply = confirmOpt?.autoReply?.trim() || settings.successReplyText;
+
       this.log(`Order ${targetOrder.shopifyOrderNumber} successfully CONFIRMED by customer (+${phoneDigits})`);
-      if (settings.successReplyText) {
-        await this.sendDirectMessage(senderJid, settings.successReplyText).catch((err) => {
+      if (confirmReply) {
+        await this.sendDirectMessage(senderJid, confirmReply).catch((err) => {
           this.log(`Failed to send confirmation auto-reply: ${err.message}`, 'warn');
         });
       }
@@ -537,9 +755,18 @@ export class BaileysService {
         });
       });
 
+      const latestOutbound = await prisma.whatsAppMessage.findFirst({
+        where: { orderId: targetOrder.id, direction: MessageDirection.OUTBOUND },
+        orderBy: { createdAt: 'desc' },
+      });
+      const outboundPayload = (latestOutbound?.payload as any) || {};
+      const outboundPollOpts: PollOption[] = outboundPayload.pollOptions || [];
+      const cancelOpt = outboundPollOpts.find((o) => o.id === 'CANCELLED' || o.text.toLowerCase().includes('cancel'));
+      const cancelReply = cancelOpt?.autoReply?.trim() || settings.cancelReplyText;
+
       this.log(`Order ${targetOrder.shopifyOrderNumber} CANCELLED by customer (+${phoneDigits})`);
-      if (settings.cancelReplyText) {
-        await this.sendDirectMessage(senderJid, settings.cancelReplyText).catch((err) => {
+      if (cancelReply) {
+        await this.sendDirectMessage(senderJid, cancelReply).catch((err) => {
           this.log(`Failed to send cancellation auto-reply: ${err.message}`, 'warn');
         });
       }
@@ -556,6 +783,24 @@ export class BaileysService {
 
     const formattedJid = jid.includes('@') ? jid : `${jid.replace(/\D/g, '')}@s.whatsapp.net`;
     return this.sock.sendMessage(formattedJid, { text });
+  }
+
+  /**
+   * Sends a native WhatsApp single-choice poll directly through the active Baileys socket.
+   */
+  public static async sendDirectPoll(jid: string, question: string, options: string[]) {
+    if (!this.sock || this.status !== WhatsAppIntegrationStatus.CONNECTED) {
+      throw new Error('WhatsApp is not connected');
+    }
+
+    const formattedJid = jid.includes('@') ? jid : `${jid.replace(/\D/g, '')}@s.whatsapp.net`;
+    return this.sock.sendMessage(formattedJid, {
+      poll: {
+        name: question,
+        values: options,
+        selectableCount: 1,
+      },
+    });
   }
 
   /**
@@ -609,14 +854,21 @@ export class BaileysService {
     const customerName = `${order.customer.firstName || 'Valued'} ${order.customer.lastName || 'Customer'}`.trim();
     const storeName = order.tenant.name || 'ByteForge Store';
 
-    const renderedBody = TemplateService.render(template.body, {
+    const templateVars = {
       customer_name: customerName,
       store_name: storeName,
       order_number: order.shopifyOrderNumber,
       currency: order.currency || 'Rs.',
       order_total: order.totalPrice.toString(),
       payment_method: 'Cash on Delivery',
-    });
+    };
+
+    const renderedBody = TemplateService.render(template.body, templateVars);
+    const renderedPollQuestion = TemplateService.render(
+      template.pollQuestion || 'Aapka order {{order_number}} confirm karein:',
+      templateVars
+    );
+    const pollOptions = (template.pollOptions as any as PollOption[]) || DEFAULT_POLL_OPTIONS;
 
     const job = await prisma.messageJob.create({
       data: {
@@ -628,7 +880,10 @@ export class BaileysService {
           renderedBody,
           customerName,
           orderNumber: order.shopifyOrderNumber,
-        },
+          hasPoll: template.hasPoll !== false,
+          pollQuestion: renderedPollQuestion,
+          pollOptions,
+        } as any,
         status: JobStatus.PENDING,
       },
     });
@@ -699,8 +954,36 @@ export class BaileysService {
           // Anti-ban delay
           await delay(delayMs);
 
-          const sent = await this.sock.sendMessage(jid, { text: bodyText });
-          const wamid = sent?.key?.id || `baileys_${Date.now()}`;
+          // 1. Send order details text message
+          const textSent = await this.sock.sendMessage(jid, { text: bodyText });
+          const textWamid = textSent?.key?.id || `baileys_${Date.now()}`;
+
+          let pollWamid: string | null = null;
+          let secretBase64: string | null = null;
+
+          const hasPoll = params.hasPoll !== false;
+          const pollOptions: PollOption[] = params.pollOptions || DEFAULT_POLL_OPTIONS;
+
+          // 2. If poll is enabled, send native single-select WhatsApp Poll
+          if (hasPoll && pollOptions.length >= 2) {
+            await delay(600); // Polite interval between text and poll
+            const pollQuestion = params.pollQuestion || 'Aapka order confirm karein:';
+            const pollSent = await this.sock.sendMessage(jid, {
+              poll: {
+                name: pollQuestion,
+                values: pollOptions.map((opt: any) => opt.text),
+                selectableCount: 1,
+              },
+            });
+
+            pollWamid = pollSent?.key?.id || null;
+            const secretBuffer = pollSent?.message?.messageContextInfo?.messageSecret;
+            if (secretBuffer) {
+              secretBase64 = Buffer.from(secretBuffer).toString('base64');
+            }
+          }
+
+          const primaryWamid = pollWamid || textWamid;
 
           await prisma.$transaction([
             prisma.messageJob.update({
@@ -712,12 +995,20 @@ export class BaileysService {
                 tenantId: job.tenantId,
                 orderId: job.orderId,
                 customerId: job.order.customerId,
-                wamid,
+                wamid: primaryWamid,
                 recipientPhone: job.recipientPhone,
                 direction: MessageDirection.OUTBOUND,
                 status: MessageStatus.SENT,
-                messageType: 'text',
-                payload: { body: bodyText },
+                messageType: hasPoll ? 'poll' : 'text',
+                payload: {
+                  body: bodyText,
+                  hasPoll,
+                  pollQuestion: params.pollQuestion,
+                  pollOptions,
+                  pollWamid,
+                  textWamid,
+                  messageSecretBase64: secretBase64,
+                } as any,
                 sentAt: new Date(),
               },
             }),
@@ -727,7 +1018,9 @@ export class BaileysService {
             }),
           ]);
 
-          this.log(`Dispatched WhatsApp confirmation to +${cleanPhone} for order ${job.order.shopifyOrderNumber}`);
+          this.log(
+            `Dispatched WhatsApp confirmation ${hasPoll ? '(Text + Poll)' : '(Text)'} to +${cleanPhone} for order ${job.order.shopifyOrderNumber}`
+          );
         } catch (jobErr: any) {
           const maxRetries = settings.maxRetryAttempts || 3;
           const currentAttempts = job.attempts + 1;
@@ -804,14 +1097,30 @@ export class BaileysService {
     const customerName = `${order.customer.firstName || 'Valued'} ${order.customer.lastName || 'Customer'}`.trim();
     const storeName = order.tenant.name || 'ByteForge Store';
 
-    const renderedBody = TemplateService.render(template.body, {
+    const templateVars = {
       customer_name: customerName,
       store_name: storeName,
       order_number: order.shopifyOrderNumber,
       currency: order.currency || 'Rs.',
       order_total: order.totalPrice.toString(),
       payment_method: 'Cash on Delivery',
-    });
+    };
+
+    const renderedBody = TemplateService.render(template.body, templateVars);
+    const renderedPollQuestion = TemplateService.render(
+      template.pollQuestion || 'Aapka order {{order_number}} confirm karein:',
+      templateVars
+    );
+    const pollOptions = (template.pollOptions as any as PollOption[]) || DEFAULT_POLL_OPTIONS;
+
+    const jobParams = {
+      renderedBody,
+      customerName,
+      orderNumber: order.shopifyOrderNumber,
+      hasPoll: template.hasPoll !== false,
+      pollQuestion: renderedPollQuestion,
+      pollOptions,
+    };
 
     const job = await prisma.messageJob.upsert({
       where: { orderId },
@@ -820,14 +1129,14 @@ export class BaileysService {
         orderId,
         recipientPhone: order.customer.phoneNumber,
         templateName: template.name,
-        parameters: { renderedBody, customerName, orderNumber: order.shopifyOrderNumber },
+        parameters: jobParams as any,
         status: JobStatus.PENDING,
       },
       update: {
         status: JobStatus.PENDING,
         attempts: 0,
         lastError: null,
-        parameters: { renderedBody, customerName, orderNumber: order.shopifyOrderNumber },
+        parameters: jobParams as any,
       },
     });
 
