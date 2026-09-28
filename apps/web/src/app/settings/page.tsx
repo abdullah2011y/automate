@@ -26,6 +26,10 @@ import {
   ExternalLink,
   ShieldCheck,
   Check,
+  Copy,
+  Webhook,
+  Store,
+  KeyRound,
 } from 'lucide-react';
 import {
   api,
@@ -33,6 +37,7 @@ import {
   MessageTemplate,
   ShopifyIntegrationStatus,
   BaileysConnectionStatus,
+  getWebhookUrl,
 } from '@/lib/api';
 
 type TabType = 'automation' | 'keywords' | 'testing' | 'shopify' | 'whatsapp' | 'health';
@@ -61,6 +66,14 @@ export default function SettingsPage() {
   const [testPhoneNumber, setTestPhoneNumber] = useState('');
   const [isTestConfirmModalOpen, setIsTestConfirmModalOpen] = useState(false);
   const [testSending, setTestSending] = useState(false);
+
+  // Shopify connection in Settings
+  const [shopifyDomainInput, setShopifyDomainInput] = useState('');
+  const [shopifyTokenInput, setShopifyTokenInput] = useState('');
+  const [shopifySecretInput, setShopifySecretInput] = useState('');
+  const [connectingStore, setConnectingStore] = useState(false);
+  const [disconnectingStore, setDisconnectingStore] = useState(false);
+  const [copiedWebhookUrl, setCopiedWebhookUrl] = useState(false);
 
   const showToast = (type: 'success' | 'error', message: string) => {
     setToast({ type, message });
@@ -195,6 +208,47 @@ export default function SettingsPage() {
       showToast('error', err.message || 'Manual synchronization failed');
     } finally {
       setActionLoading(false);
+    }
+  };
+
+  const handleConnectShopify = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!shopifyDomainInput.trim() || !shopifyTokenInput.trim()) {
+      showToast('error', 'Please enter both Shop Domain and Admin API Access Token');
+      return;
+    }
+    setConnectingStore(true);
+    try {
+      await api.connectShopify({
+        shopDomain: shopifyDomainInput.trim(),
+        accessToken: shopifyTokenInput.trim(),
+        webhookSecret: shopifySecretInput.trim() || undefined,
+      });
+      showToast('success', 'Shopify store connected successfully!');
+      setShopifyDomainInput('');
+      setShopifyTokenInput('');
+      setShopifySecretInput('');
+      const updated = await api.getShopifyStatus();
+      setShopifyStatus(updated);
+    } catch (err: any) {
+      showToast('error', `Connection failed: ${err.message}`);
+    } finally {
+      setConnectingStore(false);
+    }
+  };
+
+  const handleDisconnectShopify = async () => {
+    if (!confirm('Are you sure you want to disconnect this Shopify store? Real-time webhook ingestion will be halted.')) return;
+    setDisconnectingStore(true);
+    try {
+      await api.disconnectShopify();
+      showToast('success', 'Shopify store disconnected');
+      const updated = await api.getShopifyStatus();
+      setShopifyStatus(updated);
+    } catch (err: any) {
+      showToast('error', `Disconnect failed: ${err.message}`);
+    } finally {
+      setDisconnectingStore(false);
     }
   };
 
@@ -784,15 +838,95 @@ export default function SettingsPage() {
       {/* TAB 4: SHOPIFY INTEGRATION */}
       {activeTab === 'shopify' && (
         <div className="space-y-6">
+          {/* Webhook Configuration Card */}
+          <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-emerald-50 text-emerald-600">
+                  <Webhook className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-navy-900 uppercase tracking-wider">
+                    Official Shopify Webhook URL
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Real-time COD order confirmation and lifecycle sync endpoint
+                  </p>
+                </div>
+              </div>
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                <ShieldCheck className="w-3.5 h-3.5" /> HMAC-SHA256 Protected
+              </span>
+            </div>
+
+            <div className="space-y-2 p-4 rounded-xl border border-slate-200 bg-slate-50">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-600">Production Webhook Receiver URL:</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const url = getWebhookUrl();
+                    navigator.clipboard.writeText(url);
+                    setCopiedWebhookUrl(true);
+                    showToast('success', 'Shopify Webhook URL copied to clipboard!');
+                    setTimeout(() => setCopiedWebhookUrl(false), 2500);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-white hover:bg-slate-100 text-navy-900 border border-slate-200 shadow-sm transition-all"
+                >
+                  {copiedWebhookUrl ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-emerald-600" /> Copied!
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5 text-brand" /> Copy Webhook URL
+                    </>
+                  )}
+                </button>
+              </div>
+              <p className="text-navy-900 font-mono text-xs font-bold break-all select-all bg-white p-2.5 rounded-lg border border-slate-200/80">
+                {getWebhookUrl()}
+              </p>
+            </div>
+
+            <div className="pt-2">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-2">
+                Supported Shopify Webhook Events (Format: JSON)
+              </span>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                <div className="p-3 rounded-lg border border-slate-200 bg-slate-50/50">
+                  <div className="font-mono font-bold text-navy-900 text-xs">orders/create</div>
+                  <p className="text-slate-500 text-[11px] mt-1">Triggers automated WhatsApp confirmation message instantly when a COD order is placed.</p>
+                </div>
+                <div className="p-3 rounded-lg border border-slate-200 bg-slate-50/50">
+                  <div className="font-mono font-bold text-navy-900 text-xs">orders/updated</div>
+                  <p className="text-slate-500 text-[11px] mt-1">Syncs customer details, order fulfillment, and payment updates in real-time.</p>
+                </div>
+                <div className="p-3 rounded-lg border border-slate-200 bg-slate-50/50">
+                  <div className="font-mono font-bold text-navy-900 text-xs">orders/cancelled</div>
+                  <p className="text-slate-500 text-[11px] mt-1">Intercepts cancelled orders immediately to prevent accidental dispatch.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Store Connection Status / Form */}
           <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm space-y-6">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <div>
-                <h3 className="text-sm font-bold text-navy-900 uppercase tracking-wider">
-                  Shopify Store Connection
-                </h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Single-store integration via official Shopify Webhooks & REST Admin API
-                </p>
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-navy-900 text-brand">
+                  <Store className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-navy-900 uppercase tracking-wider">
+                    {shopifyStatus?.connected ? 'Connected Shopify Store' : 'Connect Your Shopify Store'}
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {shopifyStatus?.connected
+                      ? 'Store synchronization and webhook processing active'
+                      : 'Connect your store using your Shopify Admin API Access Token'}
+                  </p>
+                </div>
               </div>
 
               <div className="flex items-center gap-2">
@@ -814,18 +948,30 @@ export default function SettingsPage() {
                   )}
                 </span>
 
-                <button
-                  onClick={handleManualSync}
-                  disabled={actionLoading || !shopifyStatus?.connected}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-[#E6FAFE] text-[#028FA8] hover:bg-[#d5f7fd] transition-colors disabled:opacity-50"
-                >
-                  <RefreshCw className={`w-3 h-3 ${actionLoading ? 'animate-spin' : ''}`} />
-                  Sync Orders Now
-                </button>
+                {shopifyStatus?.connected && (
+                  <>
+                    <button
+                      onClick={handleManualSync}
+                      disabled={actionLoading}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-[#E6FAFE] text-[#028FA8] hover:bg-[#d5f7fd] transition-colors disabled:opacity-50"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${actionLoading ? 'animate-spin' : ''}`} />
+                      Sync Orders Now
+                    </button>
+                    <button
+                      onClick={handleDisconnectShopify}
+                      disabled={disconnectingStore}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 transition-colors disabled:opacity-50"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      {disconnectingStore ? 'Disconnecting...' : 'Disconnect'}
+                    </button>
+                  </>
+                )}
               </div>
             </div>
 
-            {shopifyStatus?.integration && (
+            {shopifyStatus?.connected && shopifyStatus.integration ? (
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/80">
                   <span className="text-[11px] font-bold text-slate-400 uppercase">Shop Domain</span>
@@ -837,7 +983,7 @@ export default function SettingsPage() {
                   <span className="text-[11px] font-bold text-slate-400 uppercase">Last Synced</span>
                   <p className="text-sm font-bold text-navy-900 mt-1">
                     {shopifyStatus.integration.lastSyncedAt
-                      ? new Date(shopifyStatus.integration.lastSyncedAt).toLocaleTimeString()
+                      ? new Date(shopifyStatus.integration.lastSyncedAt).toLocaleString()
                       : 'Never'}
                   </p>
                 </div>
@@ -845,26 +991,138 @@ export default function SettingsPage() {
                   <span className="text-[11px] font-bold text-slate-400 uppercase">Last Webhook</span>
                   <p className="text-sm font-bold text-navy-900 mt-1">
                     {shopifyStatus.integration.lastWebhookAt
-                      ? new Date(shopifyStatus.integration.lastWebhookAt).toLocaleTimeString()
+                      ? new Date(shopifyStatus.integration.lastWebhookAt).toLocaleString()
                       : 'None'}
                   </p>
                 </div>
                 <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/80">
                   <span className="text-[11px] font-bold text-slate-400 uppercase">Synced Orders</span>
                   <p className="text-sm font-bold text-navy-900 mt-1">
-                    {shopifyStatus.integration.syncedOrdersCount ?? 0}
+                    {shopifyStatus.integration.syncedOrdersCount ?? 0} Orders
                   </p>
                 </div>
               </div>
+            ) : (
+              /* Connect Form when disconnected */
+              <form onSubmit={handleConnectShopify} className="space-y-4 max-w-2xl text-xs">
+                <div>
+                  <label className="block text-slate-700 font-bold mb-1">
+                    Shopify Store Domain <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="my-store.myshopify.com"
+                    value={shopifyDomainInput}
+                    onChange={(e) => setShopifyDomainInput(e.target.value)}
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-navy-900 focus:outline-none focus:ring-2 focus:ring-brand/40"
+                    required
+                  />
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    Enter your standard myshopify handle (e.g. <code>store.myshopify.com</code>).
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-slate-700 font-bold mb-1">
+                    Admin API Access Token <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="password"
+                    placeholder="shpat_xxxxxxxxxxxxxxxxxxxxxxxx"
+                    value={shopifyTokenInput}
+                    onChange={(e) => setShopifyTokenInput(e.target.value)}
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-navy-900 focus:outline-none focus:ring-2 focus:ring-brand/40 font-mono"
+                    required
+                  />
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    Generated in Shopify Admin ➔ Settings ➔ Apps and sales channels ➔ Develop apps ➔ Create an app.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-slate-700 font-bold mb-1">
+                    Webhook Signature Secret (Optional)
+                  </label>
+                  <input
+                    type="password"
+                    placeholder="Optional shared webhook secret"
+                    value={shopifySecretInput}
+                    onChange={(e) => setShopifySecretInput(e.target.value)}
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-navy-900 focus:outline-none focus:ring-2 focus:ring-brand/40 font-mono"
+                  />
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    If omitted, the access token is used for direct webhook HMAC verification.
+                  </p>
+                </div>
+
+                <div className="pt-2">
+                  <button
+                    type="submit"
+                    disabled={connectingStore}
+                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-xs font-bold bg-navy-900 hover:bg-navy-800 text-white shadow-sm transition-all disabled:opacity-50"
+                  >
+                    <Store className="w-4 h-4 text-brand" />
+                    {connectingStore ? 'Encrypting & Connecting Store...' : 'Connect Shopify Store'}
+                  </button>
+                </div>
+              </form>
             )}
 
+            {/* Step-by-Step Setup Guide */}
+            <div className="pt-4 border-t border-slate-100">
+              <h4 className="text-xs font-bold text-navy-900 uppercase tracking-wider mb-3 flex items-center gap-2">
+                <span>📋</span> Step-by-Step Store Connection Guide
+              </h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/60 space-y-1.5">
+                  <div className="font-bold text-navy-900 flex items-center gap-2">
+                    <span className="w-5 h-5 rounded-full bg-navy-900 text-white flex items-center justify-center text-[10px]">1</span>
+                    Create Custom App in Shopify
+                  </div>
+                  <p className="text-slate-500 text-[11px] leading-relaxed">
+                    Shopify Admin kholen ➔ <strong>Settings</strong> ➔ <strong>Apps and sales channels</strong> ➔ <strong>Develop apps</strong> par jayein aur <strong>Create an app</strong> par click karein.
+                  </p>
+                </div>
+
+                <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/60 space-y-1.5">
+                  <div className="font-bold text-navy-900 flex items-center gap-2">
+                    <span className="w-5 h-5 rounded-full bg-navy-900 text-white flex items-center justify-center text-[10px]">2</span>
+                    Configure API Scopes & Install
+                  </div>
+                  <p className="text-slate-500 text-[11px] leading-relaxed">
+                    <strong>Configure Admin API scopes</strong> mein ja kar <code>read_orders</code>, <code>write_orders</code>, aur <code>read_customers</code> check karein. Phir <strong>Install app</strong> dabayein aur <strong>Admin API access token</strong> (starts with <code>shpat_</code>) copy karein.
+                  </p>
+                </div>
+
+                <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/60 space-y-1.5">
+                  <div className="font-bold text-navy-900 flex items-center gap-2">
+                    <span className="w-5 h-5 rounded-full bg-navy-900 text-white flex items-center justify-center text-[10px]">3</span>
+                    Paste Token & Connect
+                  </div>
+                  <p className="text-slate-500 text-[11px] leading-relaxed">
+                    Apna store domain (e.g. <code>xyz.myshopify.com</code>) aur copy kiya hua access token upar form mein paste karke <strong>Connect Shopify Store</strong> par click karein.
+                  </p>
+                </div>
+
+                <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/60 space-y-1.5">
+                  <div className="font-bold text-navy-900 flex items-center gap-2">
+                    <span className="w-5 h-5 rounded-full bg-navy-900 text-white flex items-center justify-center text-[10px]">4</span>
+                    Setup Webhook for Live Orders
+                  </div>
+                  <p className="text-slate-500 text-[11px] leading-relaxed">
+                    Shopify Admin ➔ <strong>Settings</strong> ➔ <strong>Notifications</strong> ➔ <strong>Webhooks</strong> mein ja kar <strong>Create Webhook</strong> karein: Event: <strong>Order creation</strong>, Format: <strong>JSON</strong>, URL: upar diya gaya Webhook URL paste karein.
+                  </p>
+                </div>
+              </div>
+            </div>
+
             {/* Webhook logs */}
-            <div>
+            <div className="pt-4 border-t border-slate-100">
               <h4 className="text-xs font-bold text-navy-900 uppercase tracking-wider mb-2">
-                Recent Shopify Webhooks (orders/create)
+                Recent Shopify Webhooks Activity
               </h4>
               {!shopifyStatus?.recentWebhooks || shopifyStatus.recentWebhooks.length === 0 ? (
-                <p className="text-xs text-slate-400 italic py-4">No recent webhook events logged.</p>
+                <p className="text-xs text-slate-400 italic py-4">No recent webhook events logged yet.</p>
               ) : (
                 <div className="overflow-x-auto rounded-lg border border-slate-200">
                   <table className="w-full text-left text-xs">
@@ -887,7 +1145,7 @@ export default function SettingsPage() {
                             </span>
                           </td>
                           <td className="px-4 py-2 text-right text-slate-400">
-                            {new Date(wh.createdAt).toLocaleTimeString()}
+                            {new Date(wh.createdAt).toLocaleString()}
                           </td>
                         </tr>
                       ))}

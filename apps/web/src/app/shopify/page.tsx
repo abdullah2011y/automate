@@ -18,14 +18,16 @@ import {
   Clock,
   Check,
   AlertTriangle,
+  Copy,
 } from 'lucide-react';
-import { api, ShopifyIntegrationStatus } from '@/lib/api';
+import { api, ShopifyIntegrationStatus, getWebhookUrl } from '@/lib/api';
 
 export default function ShopifyPage() {
   const [statusData, setStatusData] = useState<ShopifyIntegrationStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [copiedWebhook, setCopiedWebhook] = useState(false);
 
   // Connect form state
   const [connectModalOpen, setConnectModalOpen] = useState(false);
@@ -292,10 +294,32 @@ export default function ShopifyPage() {
               <p className="text-xs text-slate-400">Endpoint ready for Shopify Notifications</p>
             </div>
           </div>
-          <div className="space-y-2 mt-4 text-xs font-mono bg-slate-50 p-3 rounded-lg border border-slate-200 text-slate-700 select-all">
-            <p className="text-[11px] font-sans font-bold text-slate-500">Public Webhook URL:</p>
-            <p className="text-navy-900 font-bold">
-              {process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'}/api/v1/shopify/webhooks
+          <div className="space-y-2 mt-4 p-3 rounded-lg border border-slate-200 bg-slate-50">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-sans font-bold text-slate-500">Public Webhook URL:</span>
+              <button
+                type="button"
+                onClick={() => {
+                  const url = getWebhookUrl();
+                  navigator.clipboard.writeText(url);
+                  setCopiedWebhook(true);
+                  setTimeout(() => setCopiedWebhook(false), 2500);
+                }}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-bold bg-white hover:bg-slate-100 text-navy-900 border border-slate-200 shadow-sm transition-all"
+              >
+                {copiedWebhook ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-emerald-600" /> Copied!
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5 text-brand" /> Copy URL
+                  </>
+                )}
+              </button>
+            </div>
+            <p className="text-navy-900 font-mono text-xs font-bold break-all select-all">
+              {getWebhookUrl()}
             </p>
           </div>
           <ul className="mt-3 space-y-1 text-xs text-slate-500 list-disc list-inside">

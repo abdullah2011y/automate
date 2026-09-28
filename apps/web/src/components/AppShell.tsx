@@ -23,7 +23,7 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { api, TenantProfile, UserProfile } from '@/lib/api';
+import { api, TenantProfile, UserProfile, getApiBaseUrl } from '@/lib/api';
 
 interface NavItem {
   label: string;
@@ -102,7 +102,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
     const checkSystem = async () => {
       try {
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+        const apiUrl = getApiBaseUrl();
         const res = await fetch(`${apiUrl}/api/v1/health`, { cache: 'no-store' });
         if (res.ok) {
           if (isMounted) setApiHealth('healthy');

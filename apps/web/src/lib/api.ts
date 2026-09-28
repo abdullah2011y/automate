@@ -3,7 +3,19 @@
  * Provides strictly typed access to versioned backend endpoints (/api/v1).
  */
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+export const getApiBaseUrl = (): string => {
+  if (process.env.NEXT_PUBLIC_API_URL) {
+    return process.env.NEXT_PUBLIC_API_URL.replace(/\/$/, '');
+  }
+  if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+    return 'https://site--byteforge-backend--qb4y2b9qnwsy.code.run';
+  }
+  return 'http://localhost:5000';
+};
+
+export const getWebhookUrl = (): string => {
+  return `${getApiBaseUrl()}/api/v1/shopify/webhooks`;
+};
 
 const TOKEN_KEY = 'byteforge_auth_token';
 const USER_KEY = 'byteforge_user';
@@ -180,7 +192,7 @@ export async function ensureAuthenticated(): Promise<string> {
   }
 
   // Automatic dev fallback to seeded credentials
-  const res = await fetch(`${API_BASE}/api/v1/auth/login`, {
+  const res = await fetch(`${getApiBaseUrl()}/api/v1/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -208,7 +220,7 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     headers.set('Content-Type', 'application/json');
   }
 
-  const response = await fetch(`${API_BASE}/api/v1${endpoint}`, {
+  const response = await fetch(`${getApiBaseUrl()}/api/v1${endpoint}`, {
     ...options,
     headers,
   });
@@ -324,7 +336,7 @@ export const api = {
 
   getWhatsAppQrStreamUrl: (): string => {
     const token = authStorage.getToken();
-    return `${API_BASE}/api/v1/whatsapp/qr-stream?token=${encodeURIComponent(token || '')}`;
+    return `${getApiBaseUrl()}/api/v1/whatsapp/qr-stream?token=${encodeURIComponent(token || '')}`;
   },
 
   reconnectWhatsApp: (): Promise<{ success: boolean; message: string }> => {
