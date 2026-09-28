@@ -7,6 +7,7 @@ import makeWASocket, {
   delay,
   Browsers,
   decryptPollVote,
+  makeCacheableSignalKeyStore,
 } from '@whiskeysockets/baileys';
 import pino from 'pino';
 import qrcode from 'qrcode';
@@ -51,6 +52,75 @@ export class BaileysService {
   private static isExplicitlyStopped = false;
   private static reconnectTimer: NodeJS.Timeout | null = null;
   private static isSendingQueue = false;
+  private static messageMemoryCache = new Map<string, proto.IMessage>();
+
+  public static cacheMessage(id: string, message: proto.IMessage | null | undefined) {
+    if (!id || !message) return;
+    this.messageMemoryCache.set(id, message);
+    if (this.messageMemoryCache.size > 1000) {
+      const firstKey = this.messageMemoryCache.keys().next().value;
+      if (firstKey) this.messageMemoryCache.delete(firstKey);
+    }
+  }
+
+  /**
+   * Baileys retry and decryption handler.
+   * WhatsApp clients send retry receipts when they cannot decrypt a message.
+   * If getMessage is not implemented or returns undefined, WhatsApp mobile clients
+   * stay stuck showing: "Waiting for this message. This may take a while. Learn more".
+   */
+  public static async getMessage(key: proto.IMessageKey): Promise<proto.IMessage | undefined> {
+    if (!key.id) return undefined;
+
+    // 1. Instant in-memory cache check (avoids database latency during handshake)
+    const cached = this.messageMemoryCache.get(key.id);
+    if (cached) return cached;
+
+    // 2. Database lookup
+    try {
+      const dbMsg = await prisma.whatsAppMessage.findFirst({
+        where: { wamid: key.id },
+        select: { payload: true, messageType: true },
+      });
+
+      if (dbMsg?.payload) {
+        const p = dbMsg.payload as any;
+        if (p.rawMessage) {
+          this.cacheMessage(key.id, p.rawMessage);
+          return p.rawMessage as proto.IMessage;
+        }
+
+        if (dbMsg.messageType === 'poll' || p.hasPoll) {
+          const opts = Array.isArray(p.pollOptions) ? p.pollOptions : [];
+          const pollTitle = (p.pollQuestion || p.body || 'Order Confirmation').trim();
+          const safeTitle = pollTitle.length > 245 ? pollTitle.slice(0, 242) + '...' : pollTitle;
+
+          const reconstructed: proto.IMessage = {
+            pollCreationMessageV3: {
+              name: safeTitle,
+              options: opts.map((opt: any) => ({ optionName: String(opt.text || opt.name || opt) })),
+              selectableOptionsCount: 1,
+            },
+            messageContextInfo: {
+              messageSecret: p.messageSecretBase64 ? Buffer.from(p.messageSecretBase64, 'base64') : undefined,
+            },
+          };
+          this.cacheMessage(key.id, reconstructed);
+          return reconstructed;
+        }
+
+        if (p.body) {
+          const reconstructed: proto.IMessage = { conversation: String(p.body) };
+          this.cacheMessage(key.id, reconstructed);
+          return reconstructed;
+        }
+      }
+    } catch (err: any) {
+      this.log(`Error looking up message for retry ${key.id}: ${err.message}`, 'warn');
+    }
+
+    return undefined;
+  }
 
   private static log(message: string, level: 'info' | 'warn' | 'error' = 'info') {
     const entry = {
@@ -92,13 +162,19 @@ export class BaileysService {
       const logger = pino({ level: 'silent' });
 
       this.sock = makeWASocket({
-        auth: state,
+        auth: {
+          creds: state.creds,
+          keys: makeCacheableSignalKeyStore(state.keys, logger),
+        },
         logger,
         printQRInTerminal: false,
         browser: Browsers.macOS('Desktop'),
         connectTimeoutMs: 60000,
         keepAliveIntervalMs: 25000,
         emitOwnEvents: false,
+        getMessage: async (key: proto.IMessageKey) => {
+          return this.getMessage(key);
+        },
       });
 
       // 1. Connection Updates (QR code, connect, disconnect)
@@ -184,6 +260,13 @@ export class BaileysService {
 
       // 3. Inbound Customer Messages Listener (CONFIRM / CANCEL / POLL VOTES)
       this.sock.ev.on('messages.upsert', async ({ messages, type }) => {
+        // Cache all message objects so retry handler can instantly respond to WhatsApp's decryption retry requests
+        for (const msg of messages) {
+          if (msg.key?.id && msg.message) {
+            this.cacheMessage(msg.key.id, msg.message);
+          }
+        }
+
         if (type !== 'notify') return;
 
         for (const msg of messages) {
@@ -784,7 +867,11 @@ export class BaileysService {
     }
 
     const formattedJid = toWhatsAppJid(jid);
-    return this.sock.sendMessage(formattedJid, { text });
+    const sent = await this.sock.sendMessage(formattedJid, { text });
+    if (sent?.key?.id && sent?.message) {
+      this.cacheMessage(sent.key.id, sent.message);
+    }
+    return sent;
   }
 
   /**
@@ -796,13 +883,18 @@ export class BaileysService {
     }
 
     const formattedJid = toWhatsAppJid(jid);
-    return this.sock.sendMessage(formattedJid, {
+    const safeQuestion = question.length > 245 ? question.slice(0, 242) + '...' : question;
+    const sent = await this.sock.sendMessage(formattedJid, {
       poll: {
-        name: question,
+        name: safeQuestion,
         values: options,
         selectableCount: 1,
       },
     });
+    if (sent?.key?.id && sent?.message) {
+      this.cacheMessage(sent.key.id, sent.message);
+    }
+    return sent;
   }
 
   /**
@@ -997,25 +1089,37 @@ export class BaileysService {
 
           let wamid: string;
           let secretBase64: string | null = null;
+          let rawMessagePayload: any = null;
           const hasPoll = params.hasPoll !== false;
           const pollOptions: PollOption[] = params.pollOptions || DEFAULT_POLL_OPTIONS;
 
           if (hasPoll && pollOptions.length >= 2) {
-            // Send EXACTLY ONE message: The WhatsApp Poll containing the full message body + tap buttons
+            // Send EXACTLY ONE message: The WhatsApp Poll containing the message body + tap buttons
             const pollQuestionText = params.pollQuestion ? String(params.pollQuestion).trim() : '';
             const fullPollName = pollQuestionText && !bodyText.includes(pollQuestionText)
               ? `${bodyText}\n\n${pollQuestionText}`
               : bodyText;
 
+            // WhatsApp Poll questions have a hard protocol limit of 255 characters.
+            // Slicing at <= 245 characters guarantees 100% Protobuf schema validation and prevents decryption failure.
+            const safePollName = fullPollName.length > 245
+              ? fullPollName.slice(0, 242) + '...'
+              : fullPollName;
+
             const pollSent = await this.sock.sendMessage(jid, {
               poll: {
-                name: fullPollName,
+                name: safePollName,
                 values: pollOptions.map((opt: any) => opt.text),
                 selectableCount: 1,
               },
             });
 
             wamid = pollSent?.key?.id || `baileys_poll_${Date.now()}`;
+            if (pollSent?.message) {
+              rawMessagePayload = JSON.parse(JSON.stringify(pollSent.message));
+              this.cacheMessage(wamid, pollSent.message);
+            }
+
             const secretBuffer = pollSent?.message?.messageContextInfo?.messageSecret;
             if (secretBuffer) {
               secretBase64 = Buffer.from(secretBuffer).toString('base64');
@@ -1024,6 +1128,10 @@ export class BaileysService {
             // When poll is disabled, send standard text message only
             const textSent = await this.sock.sendMessage(jid, { text: bodyText });
             wamid = textSent?.key?.id || `baileys_${Date.now()}`;
+            if (textSent?.message) {
+              rawMessagePayload = JSON.parse(JSON.stringify(textSent.message));
+              this.cacheMessage(wamid, textSent.message);
+            }
           }
 
           await prisma.$transaction([
@@ -1048,6 +1156,7 @@ export class BaileysService {
                   pollOptions,
                   pollWamid: hasPoll ? wamid : null,
                   messageSecretBase64: secretBase64,
+                  rawMessage: rawMessagePayload,
                 } as any,
                 sentAt: new Date(),
               },

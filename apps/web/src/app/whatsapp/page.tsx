@@ -1133,9 +1133,20 @@ Order confirm ya cancel karne ke liye neeche diye gaye button par click karein.`
                   {templateForm.hasPoll && (
                     <div className="space-y-4 pt-2 border-t border-slate-800">
                       <div>
-                        <label className="block text-xs font-semibold text-slate-300 mb-1">
-                          Poll Question / Prompt
-                        </label>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block text-xs font-semibold text-slate-300">
+                            Poll Question / Prompt
+                          </label>
+                          <span
+                            className={`text-[10px] font-mono ${
+                              templateForm.body.length + (templateForm.pollQuestion?.length || 0) > 245
+                                ? 'text-amber-400 font-semibold'
+                                : 'text-slate-400'
+                            }`}
+                          >
+                            Single message: {templateForm.body.length + (templateForm.pollQuestion?.length || 0)}/245 max
+                          </span>
+                        </div>
                         <input
                           type="text"
                           value={templateForm.pollQuestion}
@@ -1143,6 +1154,11 @@ Order confirm ya cancel karne ke liye neeche diye gaye button par click karein.`
                           placeholder="e.g. Aapka order {{order_number}} confirm karein:"
                           className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500"
                         />
+                        {templateForm.body.length + (templateForm.pollQuestion?.length || 0) > 245 && (
+                          <p className="text-[11px] text-amber-400/90 mt-1">
+                            ⚠️ WhatsApp poll protocol strictly limits questions to 255 chars. Messages over 245 chars are safely trimmed to avoid encryption errors.
+                          </p>
+                        )}
                       </div>
 
                       <div className="space-y-3">
