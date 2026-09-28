@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Offline — ByteForge Omni-Commerce</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      background-color: #0A192F;
+      color: #E2E8F0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      min-height: 100dvh;
+      padding: 24px;
+      padding-top: max(24px, env(safe-area-inset-top));
+      padding-bottom: max(24px, env(safe-area-inset-bottom));
+      text-align: center;
+    }
+    .card {
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid rgba(51, 65, 85, 0.8);
+      border-radius: 20px;
+      padding: 32px 24px;
+      max-width: 440px;
+      width: 100%;
+      box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.5);
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      background: rgba(244, 63, 94, 0.15);
+      border: 1px solid rgba(244, 63, 94, 0.3);
+      color: #FB7185;
+      border-radius: 9999px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      margin-bottom: 20px;
+    }
+    .badge-dot {
+      width: 8px;
+      height: 8px;
+      background: #F43F5E;
+      border-radius: 50%;
+    }
+    .logo {
+      width: 64px;
+      height: 64px;
+      margin: 0 auto 16px;
+      background: linear-gradient(135deg, #028FA8, #10B981);
+      border-radius: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 10px 25px -5px rgba(2, 143, 168, 0.4);
+    }
+    .logo svg {
+      width: 34px;
+      height: 34px;
+      fill: none;
+      stroke: #FFFFFF;
+      stroke-width: 2.2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    h1 {
+      font-size: 22px;
+      font-weight: 800;
+      color: #FFFFFF;
+      margin-bottom: 10px;
+      letter-spacing: -0.02em;
+    }
+    p {
+      font-size: 14px;
+      line-height: 1.6;
+      color: #94A3B8;
+      margin-bottom: 24px;
+    }
+    .notice {
+      background: rgba(30, 41, 59, 0.7);
+      border: 1px solid rgba(71, 85, 105, 0.4);
+      border-radius: 12px;
+      padding: 14px 16px;
+      text-align: left;
+      font-size: 12px;
+      color: #CBD5E1;
+      margin-bottom: 24px;
+      display: flex;
+      gap: 12px;
+    }
+    .notice-icon {
+      flex-shrink: 0;
+      color: #38BDF8;
+    }
+    .retry-btn {
+      background: linear-gradient(135deg, #028FA8, #0EA5E9);
+      color: #FFFFFF;
+      border: none;
+      border-radius: 12px;
+      padding: 14px 28px;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      width: 100%;
+      transition: all 0.2s ease;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      box-shadow: 0 4px 15px rgba(2, 143, 168, 0.35);
+    }
+    .retry-btn:hover {
+      opacity: 0.95;
+      transform: translateY(-1px);
+    }
+    .retry-btn:active {
+      transform: translateY(0);
+    }
+    .status-text {
+      margin-top: 14px;
+      font-size: 11px;
+      color: #64748B;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="badge">
+      <span class="badge-dot"></span>
+      Network Disconnected
+    </div>
+
+    <div class="logo">
+      <svg viewBox="0 0 24 24">
+        <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+      </svg>
+    </div>
+
+    <h1>Offline — ByteForge</h1>
+    <p>
+      Your device is currently disconnected from the internet. Live order synchronization and automated WhatsApp messaging are temporarily paused.
+    </p>
+
+    <div class="notice">
+      <div class="notice-icon">🛡️</div>
+      <div>
+        <strong>Security & Accuracy Notice:</strong>
+        <div style="margin-top: 4px; font-size: 11px; color: #94A3B8;">
+          To guarantee real-time inventory and customer order integrity, orders are not cached or confirmed offline.
+        </div>
+      </div>
+    </div>
+
+    <button class="retry-btn" onclick="checkAndReload()">
+      <svg style="width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 2.2;" viewBox="0 0 24 24">
+        <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+      </svg>
+      Check Connection & Retry
+    </button>
+
+    <div class="status-text" id="statusMsg">Auto-reconnect will trigger when connection returns.</div>
+  </div>
+
+  <script>
+    function checkAndReload() {
+      const msg = document.getElementById('statusMsg');
+      if (navigator.onLine) {
+        msg.textContent = 'Connection detected! Reloading dashboard...';
+        msg.style.color = '#34D399';
+        setTimeout(() => { window.location.href = '/'; }, 600);
+      } else {
+        msg.textContent = 'Still offline. Please check your Wi-Fi or cellular network.';
+        msg.style.color = '#F87171';
+      }
+    }
+
+    window.addEventListener('online', () => {
+      checkAndReload();
+    });
+  </script>
+</body>
+</html>

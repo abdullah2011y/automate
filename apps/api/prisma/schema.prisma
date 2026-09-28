@@ -1,0 +1,395 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  STAFF
+}
+
+enum OrderConfirmationStatus {
+  PENDING_CONFIRMATION
+  CONFIRMED
+  CANCELLED
+  PROCESSING
+  DISPATCHED
+  DELIVERED
+  RETURNED
+}
+
+enum MessageDirection {
+  OUTBOUND
+  INBOUND
+}
+
+enum MessageStatus {
+  QUEUED
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+enum WebhookStatus {
+  RECEIVED
+  PROCESSING
+  PROCESSED
+  FAILED
+  DUPLICATE_IGNORED
+}
+
+model Tenant {
+  id             String    @id @default(uuid())
+  name           String
+  slug           String    @unique
+  subdomain      String?
+  currency       String    @default("USD")
+  timezone       String    @default("UTC")
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  users          User[]
+  orders         Order[]
+  customers      Customer[]
+  shopify        ShopifyIntegration?
+  whatsapp       WhatsAppIntegration?
+  webhookEvents  WebhookEvent[]
+  auditLogs      AuditLog[]
+  messageJobs    MessageJob[]
+  templates      MessageTemplate[]
+  automationSettings AutomationSettings?
+
+  @@map("tenants")
+}
+
+model User {
+  id           String     @id @default(uuid())
+  tenantId     String
+  tenant       Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  email        String     @unique
+  name         String
+  passwordHash String
+  role         Role       @default(STAFF)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  auditLogs    AuditLog[]
+
+  @@index([tenantId])
+  @@map("users")
+}
+
+enum SyncStatus {
+  IDLE
+  SYNCING
+  COMPLETED
+  FAILED
+}
+
+model ShopifyIntegration {
+  id                  String     @id @default(uuid())
+  tenantId            String     @unique
+  tenant              Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  shopDomain          String     @unique
+  encryptedAccessToken String
+  webhookSecret       String?
+  scopes              String?    @default("read_orders,write_orders,read_customers")
+  isActive            Boolean    @default(true)
+  lastSyncedAt        DateTime?
+  lastWebhookAt       DateTime?
+  syncStatus          SyncStatus @default(IDLE)
+  syncError           String?
+  syncedOrdersCount   Int        @default(0)
+  installedAt         DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
+
+  @@map("shopify_integrations")
+}
+
+enum WhatsAppIntegrationStatus {
+  CONNECTED
+  DISCONNECTED
+  CONNECTING
+  QR_REQUIRED
+  RECONNECTING
+  CONFIGURATION_REQUIRED
+  ERROR
+}
+
+enum JobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+model WhatsAppIntegration {
+  id                   String                    @id @default(uuid())
+  tenantId             String                    @unique
+  tenant               Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  phoneNumberId        String?
+  businessAccountId    String?
+  displayPhoneNumber   String?
+  encryptedAccessToken String?
+  encryptedAppSecret   String?
+  verifyToken          String?
+  status               WhatsAppIntegrationStatus @default(DISCONNECTED)
+  errorMessage         String?
+  lastVerifiedAt       DateTime?
+  lastConnectedAt      DateTime?
+  qrCode               String?                   @db.Text
+  autoConfirmEnabled   Boolean                   @default(true)
+  codOnly              Boolean                   @default(true)
+  isActive             Boolean                   @default(true)
+  templateName         String                    @default("order_confirmation_v1")
+  templateLanguage     String                    @default("en_US")
+  createdAt            DateTime                  @default(now())
+  updatedAt            DateTime                  @updatedAt
+
+  @@map("whatsapp_integrations")
+}
+
+model Customer {
+  id          String            @id @default(uuid())
+  tenantId    String
+  tenant      Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  firstName   String?
+  lastName    String?
+  phoneNumber String            // E.164 formatted international phone number
+  email       String?
+  totalOrders Int               @default(0)
+  totalSpent  Decimal           @default(0.00) @db.Decimal(12, 2)
+  isOptedOut  Boolean           @default(false)
+  optedOutAt  DateTime?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  orders      Order[]
+  messages    WhatsAppMessage[]
+
+  @@unique([tenantId, phoneNumber])
+  @@index([tenantId, phoneNumber])
+  @@index([phoneNumber])
+  @@map("customers")
+}
+
+model Order {
+  id                     String                  @id @default(uuid())
+  tenantId               String
+  tenant                 Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customerId             String
+  customer               Customer                @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  shopifyOrderId         String
+  shopifyOrderNumber     String
+  currency               String                  @default("USD")
+  totalPrice             Decimal                 @db.Decimal(12, 2)
+  subtotalPrice          Decimal                 @db.Decimal(12, 2)
+  totalDiscounts         Decimal                 @default(0.00) @db.Decimal(12, 2)
+  paymentGateway         String                  @default("cash_on_delivery")
+  financialStatus        String?                 @default("pending")
+  fulfillmentStatus      String?                 @default("unfulfilled")
+  source                 String                  @default("shopify")
+  shippingAddress        Json?
+  
+  confirmationStatus     OrderConfirmationStatus @default(PENDING_CONFIRMATION)
+  
+  // Timestamps
+  orderCreatedAt         DateTime                @default(now())
+  messageSentAt          DateTime?
+  confirmedAt            DateTime?
+  cancelledAt            DateTime?
+  statusChangedAt        DateTime                @default(now())
+  cancellationReason     String?
+  archivedAt             DateTime?
+  
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+
+  items                  OrderItem[]
+  whatsappMessages       WhatsAppMessage[]
+  auditLogs              AuditLog[]
+  messageJob             MessageJob?
+
+  @@unique([tenantId, shopifyOrderId])
+  @@index([tenantId, confirmationStatus])
+  @@index([tenantId, orderCreatedAt])
+  @@index([shopifyOrderId])
+  @@index([shopifyOrderNumber])
+  @@index([confirmationStatus])
+  @@index([archivedAt])
+  @@map("orders")
+}
+
+model OrderItem {
+  id               String   @id @default(uuid())
+  orderId          String
+  order            Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  shopifyLineId    String?
+  title            String
+  sku              String?
+  quantity         Int      @default(1)
+  unitPrice        Decimal  @db.Decimal(12, 2)
+  totalDiscount    Decimal  @default(0.00) @db.Decimal(12, 2)
+  createdAt        DateTime @default(now())
+
+  @@index([orderId])
+  @@map("order_items")
+}
+
+model WhatsAppMessage {
+  id             String           @id @default(uuid())
+  tenantId       String
+  orderId        String?
+  order          Order?           @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  customerId     String?
+  customer       Customer?        @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  wamid          String?          @unique // WhatsApp Message ID from Meta
+  recipientPhone String
+  direction      MessageDirection @default(OUTBOUND)
+  status         MessageStatus    @default(QUEUED)
+  messageType    String           @default("template") // template, interactive_button, text
+  payload        Json?
+  rawResponse    Json?
+  buttonPayload  String?
+  customerResponse String?
+  respondedAt    DateTime?
+  sentAt         DateTime?
+  deliveredAt    DateTime?
+  readAt         DateTime?
+  failedAt       DateTime?
+  failureReason  String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@index([tenantId, recipientPhone])
+  @@index([wamid])
+  @@index([status])
+  @@index([createdAt])
+  @@map("whatsapp_messages")
+}
+
+model WebhookEvent {
+  id             String        @id @default(uuid())
+  tenantId       String?
+  tenant         Tenant?       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  source         String        // 'shopify' or 'meta'
+  webhookId      String        // idempotency key (Shopify Webhook ID or Meta message wamid/id)
+  topic          String?
+  status         WebhookStatus @default(RECEIVED)
+  rawHeaders     Json?
+  rawPayload     Json
+  errorMessage   String?
+  processedAt    DateTime?
+  createdAt      DateTime      @default(now())
+
+  @@unique([source, webhookId])
+  @@index([tenantId, source, status])
+  @@index([createdAt])
+  @@map("webhook_events")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  orderId    String?
+  order      Order?   @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  action     String   // e.g., 'ORDER_CONFIRMED_MANUALLY', 'ORDER_STATUS_UPDATED', 'CREDENTIALS_UPDATED'
+  details    Json?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  @@index([tenantId, action])
+  @@index([tenantId, createdAt])
+  @@index([orderId])
+  @@map("audit_logs")
+}
+
+model MessageJob {
+  id             String     @id @default(uuid())
+  tenantId       String
+  tenant         Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  orderId        String     @unique
+  order          Order      @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  recipientPhone String
+  templateName   String
+  parameters     Json
+  status         JobStatus  @default(PENDING)
+  attempts       Int        @default(0)
+  maxAttempts    Int        @default(3)
+  nextAttemptAt  DateTime   @default(now())
+  lockedAt       DateTime?
+  lockedBy       String?
+  lastError      String?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  @@index([status, nextAttemptAt])
+  @@index([tenantId, status])
+  @@map("message_jobs")
+}
+
+model WhatsAppSession {
+  id        String   @id @default(uuid())
+  sessionId String   @default("default") // Single store account identifier
+  key       String   // e.g. "creds", "pre-key-1", "app-state-sync-key-..."
+  data      String   @db.Text // Encrypted session payload (AES-256-GCM)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([sessionId, key])
+  @@index([sessionId])
+  @@map("whatsapp_sessions")
+}
+
+model MessageTemplate {
+  id          String   @id @default(uuid())
+  tenantId    String?
+  tenant      Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  event       String   @default("ORDER_CONFIRMATION") // ORDER_CONFIRMATION, CANCELLED, DISPATCH, DELIVERY, MANUAL
+  body        String   @db.Text
+  isDefault   Boolean  @default(false)
+  isActive    Boolean  @default(true)
+  variables   String[] @default(["customer_name", "store_name", "order_number", "order_total", "currency"])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([tenantId, event])
+  @@map("message_templates")
+}
+
+model AutomationSettings {
+  id                 String   @id @default(uuid())
+  tenantId           String   @unique
+  tenant             Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  autoConfirmEnabled Boolean  @default(true)
+  codOnly            Boolean  @default(true)
+  defaultTemplateId  String?
+  confirmKeywords    String[] @default(["confirm", "yes", "haan", "theek", "sahi", "bilkul", "1"])
+  cancelKeywords     String[] @default(["cancel", "no", "nahi", "mat bhejo", "cancel kardo", "2"])
+  optOutKeywords     String[] @default(["stop", "unsubscribe", "optout", "ruk jao", "mat bhejna"])
+  minDelaySeconds    Int      @default(3) // Anti-ban rate limiting between outbound messages
+  successReplyText   String   @default("Shukriya! Aapka order successfully confirm ho chuka hai. Hum jald aapka parcel dispatch karein ge.")
+  cancelReplyText    String   @default("Aapka order cancel kar diya gaya hai. Agar aapko mazeed maloomat darkaar hon toh hamse rabta karein.")
+  ambiguousReplyText String   @default("Barah-e-karam apna order confirm karne ke liye CONFIRM ya cancel karne ke liye CANCEL likh kar reply karein.")
+  optOutReplyText    String   @default("Aapko notifications se unsubscribe kar diya gaya hai. Dobara activate karne ke liye START reply karein.")
+  testPhoneNumber    String?
+  eligibleOrderTypes String[] @default(["cash_on_delivery"])
+  maxRetryAttempts   Int      @default(3)
+  skipMissingPhone   Boolean  @default(true)
+  updatedAt          DateTime @updatedAt
+
+  @@map("automation_settings")
+}
+

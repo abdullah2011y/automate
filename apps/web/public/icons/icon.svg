@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0A192F" />
+      <stop offset="50%" stop-color="#0E2442" />
+      <stop offset="100%" stop-color="#050C17" />
+    </linearGradient>
+    <linearGradient id="brandGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#028FA8" />
+      <stop offset="50%" stop-color="#00D2D3" />
+      <stop offset="100%" stop-color="#10B981" />
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="14" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- Background rounded squircle -->
+  <rect width="512" height="512" rx="112" fill="url(#bgGrad)" />
+
+  <!-- Outer Border subtle accent -->
+  <rect x="4" y="4" width="504" height="504" rx="108" fill="none" stroke="rgba(2, 143, 168, 0.3)" stroke-width="6" />
+
+  <!-- Monogram & Lightning Bolt "B" shape with Glow -->
+  <g filter="url(#glow)">
+    <!-- Lightning bolt strike -->
+    <path d="M280 64L140 272h110l-28 176 160-224H272l28-160z" 
+          fill="url(#brandGrad)" 
+          stroke="#FFFFFF" 
+          stroke-width="10" 
+          stroke-linejoin="round" />
+  </g>
+</svg>

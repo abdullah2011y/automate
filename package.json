@@ -1,0 +1,41 @@
+{
+  "name": "byteforge-omni-commerce",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ByteForge Omni-Commerce — WhatsApp Order Confirmation SaaS",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n \"API,WEB\" -c \"cyan,magenta\" \"npm run dev:api\" \"npm run dev:web\"",
+    "dev:api": "npm --prefix apps/api run dev",
+    "dev:web": "npm --prefix apps/web run dev",
+    "build:api": "npm --prefix apps/api run build",
+    "build:web": "npm --prefix apps/web run build",
+    "build:mobile": "npm --prefix apps/web run build:cap && npm --prefix apps/web run cap:sync",
+    "cap:sync": "npm --prefix apps/web run cap:sync",
+    "test:api": "npm --prefix apps/api run test:e2e",
+    "test:shopify": "npm --prefix apps/api run test:shopify",
+    "test:whatsapp": "npm --prefix apps/api run test:whatsapp",
+    "test:phase5": "npm --prefix apps/api run test:phase5",
+    "db:migrate": "npm --prefix apps/api run db:migrate",
+    "db:seed": "npm --prefix apps/api run db:seed",
+    "db:generate": "npm --prefix apps/api run db:generate",
+    "db:backup": "npm --prefix apps/api run db:backup",
+    "db:restore": "npm --prefix apps/api run db:restore",
+    "db:archive": "npm --prefix apps/api run db:archive",
+    "lint": "npm --prefix apps/web run lint && npm --prefix apps/api run lint"
+  },
+  "keywords": [
+    "shopify",
+    "whatsapp",
+    "saas",
+    "ecommerce",
+    "order-confirmation"
+  ],
+  "author": "ByteForge",
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "concurrently": "^9.2.4"
+  }
+}
