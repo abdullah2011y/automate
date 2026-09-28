@@ -83,7 +83,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     const handleBeforeInstall = (e: Event) => {
       e.preventDefault();
       setDeferredPrompt(e);
-      setShowInstallPrompt(true);
+      try {
+        if (localStorage.getItem('byteforge_hide_install_prompt') !== 'true') {
+          setShowInstallPrompt(true);
+        }
+      } catch (err) {
+        setShowInstallPrompt(true);
+      }
     };
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstall);
@@ -101,8 +107,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     const { outcome } = await deferredPrompt.userChoice;
     if (outcome === 'accepted') {
       setShowInstallPrompt(false);
+      try {
+        localStorage.setItem('byteforge_hide_install_prompt', 'true');
+      } catch (err) {}
     }
     setDeferredPrompt(null);
+  };
+
+  const handleDismissInstall = (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setShowInstallPrompt(false);
+    try {
+      localStorage.setItem('byteforge_hide_install_prompt', 'true');
+    } catch (err) {}
   };
 
   // Live health, WhatsApp, and Store Profile fetch
@@ -255,10 +272,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         {/* Install PWA Prompt (if available) */}
         {showInstallPrompt && (
-          <div className="mx-3 mb-2 p-3 rounded-xl bg-[#E6FAFE] border border-[#028FA8]/30">
-            <div className="flex items-center gap-2 text-xs font-bold text-[#028FA8]">
-              <Download className="w-4 h-4" />
-              <span>Install Desktop App</span>
+          <div className="mx-3 mb-2 p-3 rounded-xl bg-[#E6FAFE] border border-[#028FA8]/30 relative">
+            <div className="flex items-center justify-between text-xs font-bold text-[#028FA8]">
+              <div className="flex items-center gap-2">
+                <Download className="w-4 h-4 text-[#028FA8]" />
+                <span>Install Desktop App</span>
+              </div>
+              <button
+                type="button"
+                onClick={handleDismissInstall}
+                className="p-1 -mr-1 -mt-1 rounded-md text-slate-400 hover:text-slate-700 hover:bg-black/5 transition"
+                title="Dismiss"
+                aria-label="Dismiss install prompt"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
             </div>
             <p className="text-[11px] text-slate-600 mt-1">
               Add ByteForge to your applications for one-click access.
@@ -386,10 +414,22 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
               {/* Install PWA Prompt on mobile */}
               {showInstallPrompt && (
-                <div className="mt-4 p-4 rounded-xl bg-[#E6FAFE] border border-[#028FA8]/30">
-                  <h4 className="text-xs font-bold text-[#028FA8] flex items-center gap-2">
-                    <Download className="w-4 h-4" /> Install iPhone / Mobile App
-                  </h4>
+                <div className="mt-4 p-4 rounded-xl bg-[#E6FAFE] border border-[#028FA8]/30 relative">
+                  <div className="flex items-center justify-between text-xs font-bold text-[#028FA8]">
+                    <div className="flex items-center gap-2">
+                      <Download className="w-4 h-4" />
+                      <span>Install iPhone / Mobile App</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleDismissInstall}
+                      className="p-1 -mr-1 -mt-1 rounded-md text-slate-400 hover:text-slate-700 hover:bg-black/5 transition"
+                      title="Dismiss"
+                      aria-label="Dismiss install prompt"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
                   <p className="text-xs text-slate-600 mt-1 leading-relaxed">
                     Install ByteForge to your home screen for full standalone experience.
                   </p>
