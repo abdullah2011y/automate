@@ -232,7 +232,7 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   }
 
   const result = await response.json();
-  return result.data;
+  return result.data !== undefined ? result.data : result;
 }
 
 export const api = {
@@ -330,8 +330,10 @@ export const api = {
   },
 
   // WhatsApp Baileys Web Integration (Phase 4)
-  getWhatsAppStatus: (): Promise<{ success: boolean; data: BaileysConnectionStatus }> => {
-    return request('/whatsapp/status');
+  getWhatsAppStatus: async (): Promise<{ success: boolean; data: BaileysConnectionStatus }> => {
+    const res = await request<any>('/whatsapp/status');
+    const data = res?.data !== undefined && !res.status ? res.data : res;
+    return { success: true, data };
   },
 
   getWhatsAppQrStreamUrl: (): string => {
@@ -339,22 +341,34 @@ export const api = {
     return `${getApiBaseUrl()}/api/v1/whatsapp/qr-stream?token=${encodeURIComponent(token || '')}`;
   },
 
-  reconnectWhatsApp: (): Promise<{ success: boolean; message: string }> => {
-    return request('/whatsapp/reconnect', {
+  reconnectWhatsApp: async (): Promise<{ success: boolean; message: string }> => {
+    const res = await request<any>('/whatsapp/reconnect', {
       method: 'POST',
     });
+    return {
+      success: true,
+      message: res?.message || 'Reconnecting WhatsApp...',
+    };
   },
 
-  disconnectWhatsApp: (): Promise<{ success: boolean; message: string }> => {
-    return request('/whatsapp/disconnect', {
+  disconnectWhatsApp: async (): Promise<{ success: boolean; message: string }> => {
+    const res = await request<any>('/whatsapp/disconnect', {
       method: 'POST',
     });
+    return {
+      success: true,
+      message: res?.message || 'WhatsApp disconnected',
+    };
   },
 
-  resetWhatsAppSession: (): Promise<{ success: boolean; message: string }> => {
-    return request('/whatsapp/reset', {
+  resetWhatsAppSession: async (): Promise<{ success: boolean; message: string }> => {
+    const res = await request<any>('/whatsapp/reset', {
       method: 'POST',
     });
+    return {
+      success: true,
+      message: res?.message || 'WhatsApp session reset successfully',
+    };
   },
 
   resendWhatsAppConfirmation: (orderId: string): Promise<any> => {
@@ -364,11 +378,13 @@ export const api = {
   },
 
   // WhatsApp Message Templates
-  getTemplates: (): Promise<{ success: boolean; data: MessageTemplate[] }> => {
-    return request('/whatsapp/templates');
+  getTemplates: async (): Promise<{ success: boolean; data: MessageTemplate[] }> => {
+    const res = await request<any>('/whatsapp/templates');
+    const data = Array.isArray(res) ? res : (Array.isArray(res?.data) ? res.data : []);
+    return { success: true, data };
   },
 
-  createTemplate: (data: {
+  createTemplate: async (data: {
     name: string;
     description?: string;
     body: string;
@@ -376,13 +392,18 @@ export const api = {
     isDefault?: boolean;
     isEnabled?: boolean;
   }): Promise<{ success: boolean; data: MessageTemplate; message: string }> => {
-    return request('/whatsapp/templates', {
+    const res = await request<any>('/whatsapp/templates', {
       method: 'POST',
       body: JSON.stringify(data),
     });
+    return {
+      success: true,
+      data: res?.data || res,
+      message: res?.message || 'Template created successfully',
+    };
   },
 
-  updateTemplate: (
+  updateTemplate: async (
     id: string,
     data: {
       name?: string;
@@ -393,19 +414,28 @@ export const api = {
       isActive?: boolean;
     }
   ): Promise<{ success: boolean; data: MessageTemplate; message: string }> => {
-    return request(`/whatsapp/templates/${id}`, {
+    const res = await request<any>(`/whatsapp/templates/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
     });
+    return {
+      success: true,
+      data: res?.data || res,
+      message: res?.message || 'Template updated successfully',
+    };
   },
 
-  deleteTemplate: (id: string): Promise<{ success: boolean; message: string }> => {
-    return request(`/whatsapp/templates/${id}`, {
+  deleteTemplate: async (id: string): Promise<{ success: boolean; message: string }> => {
+    const res = await request<any>(`/whatsapp/templates/${id}`, {
       method: 'DELETE',
     });
+    return {
+      success: true,
+      message: res?.message || 'Template deleted successfully',
+    };
   },
 
-  previewTemplate: (
+  previewTemplate: async (
     body: string,
     variables?: Record<string, string>
   ): Promise<{
@@ -416,39 +446,55 @@ export const api = {
       sampleVariables: Record<string, string>;
     };
   }> => {
-    return request('/whatsapp/templates/preview', {
+    const res = await request<any>('/whatsapp/templates/preview', {
       method: 'POST',
       body: JSON.stringify({ body, variables }),
     });
+    return {
+      success: true,
+      data: res?.data || res,
+    };
   },
 
-  testSendTemplate: (
+  testSendTemplate: async (
     body: string,
     recipientPhone: string,
     variables?: Record<string, string>
   ): Promise<{ success: boolean; message: string; data: { rendered: string } }> => {
-    return request('/whatsapp/templates/test-send', {
+    const res = await request<any>('/whatsapp/templates/test-send', {
       method: 'POST',
-      body: JSON.stringify({ body, recipientPhone, variables }),
+      body: JSON.stringify({ body, recipientPhone, variables, confirmed: true }),
     });
+    return {
+      success: true,
+      message: res?.message || 'Test message sent successfully',
+      data: res?.data || { rendered: body },
+    };
   },
 
   // Automation Settings
-  getAutomationSettings: (): Promise<{ success: boolean; data: AutomationSettings }> => {
-    return request('/whatsapp/automation-settings');
+  getAutomationSettings: async (): Promise<{ success: boolean; data: AutomationSettings }> => {
+    const res = await request<any>('/whatsapp/automation-settings');
+    const data = res?.data !== undefined && !res.confirmKeywords ? res.data : res;
+    return { success: true, data };
   },
 
-  updateAutomationSettings: (
+  updateAutomationSettings: async (
     data: Partial<AutomationSettings>
   ): Promise<{ success: boolean; message: string; data: AutomationSettings }> => {
-    return request('/whatsapp/automation-settings', {
+    const res = await request<any>('/whatsapp/automation-settings', {
       method: 'PUT',
       body: JSON.stringify(data),
     });
+    return {
+      success: true,
+      message: res?.message || 'Automation settings updated',
+      data: res?.data || res,
+    };
   },
 
   // Message History
-  getWhatsAppMessages: (params?: {
+  getWhatsAppMessages: async (params?: {
     page?: number;
     limit?: number;
     orderId?: string;
@@ -475,7 +521,15 @@ export const api = {
     if (params?.direction) query.set('direction', params.direction);
     if (params?.search) query.set('search', params.search);
     const qs = query.toString();
-    return request(`/whatsapp/messages${qs ? `?${qs}` : ''}`);
+    const res = await request<any>(`/whatsapp/messages${qs ? `?${qs}` : ''}`);
+    const data = res?.data !== undefined && !res.messages ? res.data : res;
+    return {
+      success: true,
+      data: {
+        messages: Array.isArray(data?.messages) ? data.messages : [],
+        pagination: data?.pagination || { total: 0, page: 1, limit: 20, totalPages: 1 },
+      },
+    };
   },
 };
 

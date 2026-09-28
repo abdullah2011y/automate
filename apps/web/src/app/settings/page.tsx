@@ -91,17 +91,25 @@ export default function SettingsPage() {
         api.getDetailedHealth(),
       ]);
 
-      if (settingsRes.status === 'fulfilled' && settingsRes.value.success) {
-        setSettings(settingsRes.value.data);
-        if (settingsRes.value.data.testPhoneNumber) {
-          setTestPhoneNumber(settingsRes.value.data.testPhoneNumber);
+      if (settingsRes.status === 'fulfilled' && settingsRes.value) {
+        const val: any = settingsRes.value;
+        const sData = val?.data || val;
+        if (sData) {
+          setSettings(sData);
+          if (sData.testPhoneNumber) {
+            setTestPhoneNumber(sData.testPhoneNumber);
+          }
         }
       }
 
-      if (templatesRes.status === 'fulfilled' && templatesRes.value.success) {
-        setTemplates(templatesRes.value.data);
-        if (templatesRes.value.data.length > 0) {
-          const defaultTpl = templatesRes.value.data.find((t) => t.isDefault) || templatesRes.value.data[0];
+      if (templatesRes.status === 'fulfilled' && templatesRes.value) {
+        const val: any = templatesRes.value;
+        const tList: MessageTemplate[] = Array.isArray(val?.data)
+          ? val.data
+          : (Array.isArray(val) ? val : []);
+        setTemplates(tList);
+        if (tList.length > 0) {
+          const defaultTpl = tList.find((t) => t.isDefault) || tList[0];
           setTestTemplateBody(defaultTpl.body);
         }
       }
@@ -110,8 +118,10 @@ export default function SettingsPage() {
         setShopifyStatus(shopifyRes.value);
       }
 
-      if (waRes.status === 'fulfilled' && waRes.value?.data) {
-        setWaStatus(waRes.value.data);
+      if (waRes.status === 'fulfilled' && waRes.value) {
+        const val: any = waRes.value;
+        const wData = val?.data || val;
+        setWaStatus(wData);
       }
 
       if (healthRes.status === 'fulfilled') {

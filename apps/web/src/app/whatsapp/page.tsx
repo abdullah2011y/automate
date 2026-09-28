@@ -39,7 +39,58 @@ import {
   WhatsAppMessageRecord,
 } from '@/lib/api';
 
-export default function WhatsAppPage() {
+interface ErrorBoundaryProps {
+  children: React.ReactNode;
+}
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+class WhatsAppErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error('WhatsAppErrorBoundary caught error:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-[400px] flex items-center justify-center p-6">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 max-w-lg text-center shadow-2xl">
+            <div className="w-14 h-14 rounded-full bg-rose-500/10 text-rose-400 flex items-center justify-center mx-auto mb-4 border border-rose-500/20">
+              <AlertTriangle className="w-7 h-7" />
+            </div>
+            <h3 className="text-lg font-bold text-white mb-2">WhatsApp Module Recovered</h3>
+            <p className="text-xs text-slate-400 mb-6">
+              A temporary rendering issue occurred. Click the button below to reload and continue smoothly.
+            </p>
+            <button
+              onClick={() => {
+                this.setState({ hasError: false, error: null });
+                window.location.reload();
+              }}
+              className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold transition inline-flex items-center gap-2"
+            >
+              <RefreshCw className="w-4 h-4" />
+              Reload WhatsApp Module
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function WhatsAppContent() {
   const [activeTab, setActiveTab] = useState<'connection' | 'templates' | 'automation' | 'history'>('connection');
 
   // Connection State
@@ -132,10 +183,15 @@ export default function WhatsAppPage() {
   const fetchTemplates = async () => {
     setLoadingTemplates(true);
     try {
-      const res = await api.getTemplates();
-      setTemplates(res.data);
-    } catch (err) {
+      const res: any = await api.getTemplates();
+      const list = Array.isArray(res?.data)
+        ? res.data
+        : (Array.isArray(res) ? res : []);
+      setTemplates(list);
+    } catch (err: any) {
       console.error('Failed to load templates:', err);
+      setActionMessage({ type: 'error', text: err?.message || 'Failed to load templates' });
+      setTemplates([]);
     } finally {
       setLoadingTemplates(false);
     }
@@ -144,9 +200,16 @@ export default function WhatsAppPage() {
   // Fetch Settings
   const fetchSettings = async () => {
     try {
-      const res = await api.getAutomationSettings();
-      setSettings(res.data);
-    } catch (err) {
+      const res: any = await api.getAutomationSettings();
+      const settingsData = res?.data || res;
+      if (settingsData && typeof settingsData === 'object') {
+        setSettings({
+          ...settingsData,
+          confirmKeywords: Array.isArray(settingsData.confirmKeywords) ? settingsData.confirmKeywords : [],
+          cancelKeywords: Array.isArray(settingsData.cancelKeywords) ? settingsData.cancelKeywords : [],
+        });
+      }
+    } catch (err: any) {
       console.error('Failed to load settings:', err);
     }
   };
@@ -155,13 +218,17 @@ export default function WhatsAppPage() {
   const fetchMessages = async () => {
     setLoadingMessages(true);
     try {
-      const res = await api.getWhatsAppMessages({
+      const res: any = await api.getWhatsAppMessages({
         search: historySearch || undefined,
         status: historyStatusFilter || undefined,
       });
-      setMessages(res.data.messages);
-    } catch (err) {
+      const list = Array.isArray(res?.data?.messages)
+        ? res.data.messages
+        : (Array.isArray(res?.messages) ? res.messages : []);
+      setMessages(list);
+    } catch (err: any) {
       console.error('Failed to load messages:', err);
+      setMessages([]);
     } finally {
       setLoadingMessages(false);
     }
@@ -240,14 +307,15 @@ Cancel karne ke liye CANCEL reply karein.`,
   };
 
   const handleOpenEditTemplate = (tmpl: MessageTemplate) => {
+    if (!tmpl) return;
     setEditingTemplate(tmpl);
     setTemplateForm({
-      name: tmpl.name,
+      name: tmpl.name || '',
       description: tmpl.description || '',
-      event: tmpl.event,
-      body: tmpl.body,
-      isDefault: tmpl.isDefault,
-      isEnabled: tmpl.isActive,
+      event: tmpl.event || 'ORDER_CONFIRMATION',
+      body: tmpl.body || '',
+      isDefault: Boolean(tmpl.isDefault),
+      isEnabled: tmpl.isActive !== undefined ? Boolean(tmpl.isActive) : true,
     });
     setIsTemplateModalOpen(true);
   };
@@ -264,37 +332,47 @@ Cancel karne ke liye CANCEL reply karein.`,
           isDefault: templateForm.isDefault,
           isActive: templateForm.isEnabled,
         });
+        setActionMessage({ type: 'success', text: 'Template updated successfully!' });
       } else {
-        await api.createTemplate(templateForm);
+        await api.createTemplate({
+          name: templateForm.name,
+          description: templateForm.description,
+          event: templateForm.event,
+          body: templateForm.body,
+          isDefault: templateForm.isDefault,
+          isEnabled: templateForm.isEnabled,
+        });
+        setActionMessage({ type: 'success', text: 'Template created successfully!' });
       }
       setIsTemplateModalOpen(false);
       fetchTemplates();
     } catch (err: any) {
-      alert(err.message || 'Failed to save template');
+      alert(err?.message || 'Failed to save template');
     }
   };
 
   const handleDeleteTemplate = async (id: string) => {
     if (!confirm('Are you sure you want to delete this template?')) return;
     try {
-      await api.deleteTemplate(id);
+      const res = await api.deleteTemplate(id);
+      setActionMessage({ type: 'success', text: res?.message || 'Template deleted' });
       fetchTemplates();
     } catch (err: any) {
-      alert(err.message || 'Failed to delete template');
+      alert(err?.message || 'Failed to delete template');
     }
   };
 
   const handleTestSend = async () => {
-    if (!testPhone) {
+    if (!testPhone.trim()) {
       alert('Please enter a recipient phone number (e.g. +923001234567)');
       return;
     }
     setIsTestingTemplate(true);
     try {
-      const res = await api.testSendTemplate(templateForm.body, testPhone, previewVars);
-      alert(res.message);
+      const res = await api.testSendTemplate(templateForm.body, testPhone.trim(), previewVars);
+      alert(res.message || 'Test message sent successfully');
     } catch (err: any) {
-      alert(err.message || 'Failed to send test message');
+      alert(err?.message || 'Failed to send test message');
     } finally {
       setIsTestingTemplate(false);
     }
@@ -309,7 +387,7 @@ Cancel karne ke liye CANCEL reply karein.`,
       setSettings(res.data);
       alert('Automation settings updated successfully');
     } catch (err: any) {
-      alert(err.message || 'Failed to save settings');
+      alert(err?.message || 'Failed to save settings');
     } finally {
       setSavingSettings(false);
     }
@@ -317,6 +395,7 @@ Cancel karne ke liye CANCEL reply karein.`,
 
   // Helper for rendering preview text dynamically
   const renderPreview = (text: string) => {
+    if (!text) return '';
     return text.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_match, varName) => {
       return previewVars[varName] !== undefined ? previewVars[varName] : `{{${varName}}}`;
     });
@@ -728,9 +807,24 @@ Cancel karne ke liye CANCEL reply karein.`,
               <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-emerald-400" />
               Loading templates...
             </div>
+          ) : !templates || templates.length === 0 ? (
+            <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-12 text-center">
+              <FileText className="w-12 h-12 text-slate-600 mx-auto mb-3" />
+              <h3 className="text-base font-bold text-white mb-1">No Message Templates Found</h3>
+              <p className="text-xs text-slate-400 mb-4 max-w-sm mx-auto">
+                Create a custom template for order confirmations, shipping updates, or marketing alerts.
+              </p>
+              <button
+                onClick={handleOpenCreateTemplate}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold transition shadow-lg shadow-emerald-900/20"
+              >
+                <Plus className="w-4 h-4" />
+                Create Template
+              </button>
+            </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {templates.map((tmpl) => (
+              {(templates || []).map((tmpl) => (
                 <div
                   key={tmpl.id}
                   className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 flex flex-col justify-between"
@@ -764,7 +858,7 @@ Cancel karne ke liye CANCEL reply karein.`,
                     </div>
 
                     <div className="flex flex-wrap gap-1.5 mb-4">
-                      {tmpl.variables.map((v, i) => (
+                      {(tmpl.variables || []).map((v, i) => (
                         <span
                           key={i}
                           className="px-2 py-0.5 rounded bg-slate-800 text-[10px] font-mono text-indigo-300 border border-slate-700"
@@ -1057,7 +1151,7 @@ Cancel karne ke liye CANCEL reply karein.`,
                     Confirmation Keywords (Case-insensitive matching)
                   </label>
                   <div className="flex flex-wrap gap-2 mb-2">
-                    {settings.confirmKeywords.map((kw, i) => (
+                    {(settings.confirmKeywords || []).map((kw, i) => (
                       <span
                         key={i}
                         className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded-lg text-xs font-semibold"
@@ -1068,7 +1162,7 @@ Cancel karne ke liye CANCEL reply karein.`,
                           onClick={() =>
                             setSettings({
                               ...settings,
-                              confirmKeywords: settings.confirmKeywords.filter((k) => k !== kw),
+                              confirmKeywords: (settings.confirmKeywords || []).filter((k) => k !== kw),
                             })
                           }
                           className="hover:text-emerald-200"
@@ -1089,7 +1183,7 @@ Cancel karne ke liye CANCEL reply karein.`,
                           e.preventDefault();
                           setSettings({
                             ...settings,
-                            confirmKeywords: [...settings.confirmKeywords, newConfirmKeyword.trim().toLowerCase()],
+                            confirmKeywords: [...(settings.confirmKeywords || []), newConfirmKeyword.trim().toLowerCase()],
                           });
                           setNewConfirmKeyword('');
                         }
@@ -1102,7 +1196,7 @@ Cancel karne ke liye CANCEL reply karein.`,
                         if (newConfirmKeyword.trim()) {
                           setSettings({
                             ...settings,
-                            confirmKeywords: [...settings.confirmKeywords, newConfirmKeyword.trim().toLowerCase()],
+                            confirmKeywords: [...(settings.confirmKeywords || []), newConfirmKeyword.trim().toLowerCase()],
                           });
                           setNewConfirmKeyword('');
                         }
@@ -1120,7 +1214,7 @@ Cancel karne ke liye CANCEL reply karein.`,
                     Cancellation Keywords (Case-insensitive matching)
                   </label>
                   <div className="flex flex-wrap gap-2 mb-2">
-                    {settings.cancelKeywords.map((kw, i) => (
+                    {(settings.cancelKeywords || []).map((kw, i) => (
                       <span
                         key={i}
                         className="inline-flex items-center gap-1.5 px-3 py-1 bg-rose-500/10 border border-rose-500/30 text-rose-400 rounded-lg text-xs font-semibold"
@@ -1131,7 +1225,7 @@ Cancel karne ke liye CANCEL reply karein.`,
                           onClick={() =>
                             setSettings({
                               ...settings,
-                              cancelKeywords: settings.cancelKeywords.filter((k) => k !== kw),
+                              cancelKeywords: (settings.cancelKeywords || []).filter((k) => k !== kw),
                             })
                           }
                           className="hover:text-rose-200"
@@ -1152,7 +1246,7 @@ Cancel karne ke liye CANCEL reply karein.`,
                           e.preventDefault();
                           setSettings({
                             ...settings,
-                            cancelKeywords: [...settings.cancelKeywords, newCancelKeyword.trim().toLowerCase()],
+                            cancelKeywords: [...(settings.cancelKeywords || []), newCancelKeyword.trim().toLowerCase()],
                           });
                           setNewCancelKeyword('');
                         }
@@ -1165,7 +1259,7 @@ Cancel karne ke liye CANCEL reply karein.`,
                         if (newCancelKeyword.trim()) {
                           setSettings({
                             ...settings,
-                            cancelKeywords: [...settings.cancelKeywords, newCancelKeyword.trim().toLowerCase()],
+                            cancelKeywords: [...(settings.cancelKeywords || []), newCancelKeyword.trim().toLowerCase()],
                           });
                           setNewCancelKeyword('');
                         }
@@ -1288,14 +1382,14 @@ Cancel karne ke liye CANCEL reply karein.`,
                         Loading message logs...
                       </td>
                     </tr>
-                  ) : messages.length === 0 ? (
+                  ) : !messages || messages.length === 0 ? (
                     <tr>
                       <td colSpan={6} className="py-8 text-center text-slate-500 font-sans">
                         No messages logged yet. Confirmation messages will appear here when orders are placed.
                       </td>
                     </tr>
                   ) : (
-                    messages.map((msg) => (
+                    (messages || []).map((msg) => (
                       <tr key={msg.id} className="hover:bg-slate-800/30 transition">
                         <td className="py-3 px-4">
                           {msg.direction === 'OUTBOUND' ? (
@@ -1351,11 +1445,15 @@ Cancel karne ke liye CANCEL reply karein.`,
                           )}
                         </td>
                         <td className="py-3 px-4 text-slate-500">
-                          {new Date(msg.createdAt).toLocaleTimeString([], {
-                            hour: '2-digit',
-                            minute: '2-digit',
-                            second: '2-digit',
-                          })}
+                          {msg.createdAt ? (
+                            new Date(msg.createdAt).toLocaleTimeString([], {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                              second: '2-digit',
+                            })
+                          ) : (
+                            '—'
+                          )}
                         </td>
                       </tr>
                     ))
@@ -1367,5 +1465,13 @@ Cancel karne ke liye CANCEL reply karein.`,
         </div>
       )}
     </div>
+  );
+}
+
+export default function WhatsAppPage() {
+  return (
+    <WhatsAppErrorBoundary>
+      <WhatsAppContent />
+    </WhatsAppErrorBoundary>
   );
 }
