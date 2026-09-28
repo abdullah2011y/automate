@@ -4,6 +4,7 @@ import makeWASocket, {
   WASocket,
   proto,
   delay,
+  Browsers,
 } from '@whiskeysockets/baileys';
 import pino from 'pino';
 import qrcode from 'qrcode';
@@ -87,7 +88,7 @@ export class BaileysService {
         auth: state,
         logger,
         printQRInTerminal: false,
-        browser: ['ByteForge Omni-Commerce', 'Desktop', '1.0.0'],
+        browser: Browsers.macOS('Desktop'),
         connectTimeoutMs: 60000,
         keepAliveIntervalMs: 25000,
         emitOwnEvents: false,
@@ -259,6 +260,35 @@ export class BaileysService {
     this.isExplicitlyStopped = false;
     await this.connect();
     return { success: true, message: 'Reconnection initiated' };
+  }
+
+  /**
+   * Completely purges all stored cryptographic session keys from PostgreSQL
+   * and initializes a pristine, clean pairing QR code.
+   */
+  public static async resetSession() {
+    this.log('Hard resetting WhatsApp session and purging PostgreSQL credentials...');
+    await this.disconnect();
+
+    try {
+      await prisma.whatsAppSession.deleteMany({
+        where: { sessionId: 'default' },
+      });
+      this.log('Cleared all PostgreSQL session keys for default session.');
+    } catch (e: any) {
+      this.log(`Error clearing session keys: ${e.message}`, 'error');
+    }
+
+    this.displayPhoneNumber = null;
+    this.connectedAt = null;
+    this.qrCodeDataUrl = null;
+    this.status = WhatsAppIntegrationStatus.DISCONNECTED;
+    await this.syncDatabaseIntegrationStatus();
+    this.broadcastState();
+
+    this.isExplicitlyStopped = false;
+    await this.connect();
+    return { success: true, message: 'WhatsApp session reset. Generating fresh QR code...' };
   }
 
   /**

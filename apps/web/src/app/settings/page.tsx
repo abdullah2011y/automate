@@ -267,6 +267,22 @@ export default function SettingsPage() {
     }
   };
 
+  // WhatsApp reset session
+  const handleResetWA = async () => {
+    if (!confirm('Are you sure you want to completely reset WhatsApp session? This will wipe stored keys and generate a fresh pairing QR code.')) return;
+    setActionLoading(true);
+    try {
+      const res = await api.resetWhatsAppSession();
+      showToast('success', res.message || 'WhatsApp session reset. Generating fresh QR code...');
+      const updated = await api.getWhatsAppStatus();
+      setWaStatus(updated.data);
+    } catch (err: any) {
+      showToast('error', err.message || 'Failed to reset WhatsApp session');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   // Test Send execution
   const executeTestSend = async () => {
     if (!testPhoneNumber.trim()) {
@@ -1177,8 +1193,10 @@ export default function SettingsPage() {
                   className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${
                     waStatus?.status === 'CONNECTED'
                       ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                      : waStatus?.status === 'QR_REQUIRED'
+                      ? 'bg-amber-50 text-amber-700 border border-amber-200 animate-pulse'
                       : waStatus?.status === 'CONNECTING'
-                      ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                      ? 'bg-sky-50 text-sky-700 border border-sky-200 animate-pulse'
                       : 'bg-rose-50 text-rose-700 border border-rose-200'
                   }`}
                 >
@@ -1186,21 +1204,36 @@ export default function SettingsPage() {
                     className={`w-2 h-2 rounded-full ${
                       waStatus?.status === 'CONNECTED'
                         ? 'bg-emerald-500'
+                        : waStatus?.status === 'QR_REQUIRED'
+                        ? 'bg-amber-500'
                         : waStatus?.status === 'CONNECTING'
-                        ? 'bg-amber-500 animate-pulse'
+                        ? 'bg-sky-500'
                         : 'bg-rose-500'
                     }`}
                   />
-                  {waStatus?.status || 'DISCONNECTED'}
+                  {waStatus?.status === 'CONNECTED'
+                    ? `CONNECTED (+${waStatus.displayPhoneNumber || 'Active'})`
+                    : waStatus?.status === 'QR_REQUIRED'
+                    ? 'AWAITING QR SCAN'
+                    : waStatus?.status || 'DISCONNECTED'}
                 </span>
 
-                <button
-                  onClick={handleReconnectWA}
-                  disabled={actionLoading}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-navy-900 text-white hover:bg-navy-800 transition-colors disabled:opacity-50"
+                <Link
+                  href="/whatsapp"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-navy-900 text-white hover:bg-navy-800 transition-colors"
                 >
-                  <Power className="w-3.5 h-3.5 text-brand" />
-                  Reconnect Socket
+                  <ExternalLink className="w-3.5 h-3.5 text-brand" />
+                  Open QR Pairing
+                </Link>
+
+                <button
+                  onClick={handleResetWA}
+                  disabled={actionLoading}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 transition-colors disabled:opacity-50"
+                  title="Wipes stale PostgreSQL session keys and restarts socket"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${actionLoading ? 'animate-spin' : ''}`} />
+                  Reset Session
                 </button>
               </div>
             </div>

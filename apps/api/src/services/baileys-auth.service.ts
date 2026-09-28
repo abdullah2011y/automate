@@ -37,10 +37,17 @@ export async function usePostgresAuthState(
       const decrypted = decryptCredential(credsRecord.data);
       creds = JSON.parse(decrypted, BufferJSON.reviver);
     } catch (err) {
-      console.warn('[Baileys Auth] Failed to decrypt saved credentials, generating fresh credentials:', err);
+      console.warn('[Baileys Auth] Failed to decrypt saved credentials, wiping stale session keys and generating fresh credentials:', err);
+      await prisma.whatsAppSession.deleteMany({
+        where: { sessionId },
+      }).catch(() => {});
       creds = initAuthCreds();
     }
   } else {
+    // Clean up any orphaned stale keys from previous incomplete sessions
+    await prisma.whatsAppSession.deleteMany({
+      where: { sessionId, key: { not: 'creds' } },
+    }).catch(() => {});
     creds = initAuthCreds();
   }
 

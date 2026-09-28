@@ -72,6 +72,22 @@ export const disconnect = async (
 };
 
 /**
+ * Hard-reset WhatsApp session, purge PostgreSQL keys, and start fresh QR pairing.
+ */
+export const resetSession = async (
+  _req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const result = await BaileysService.resetSession();
+    res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * Resend confirmation message for an order.
  */
 export const resendConfirmation = async (

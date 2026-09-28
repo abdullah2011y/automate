@@ -23,7 +23,14 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { api, TenantProfile, UserProfile, getApiBaseUrl } from '@/lib/api';
+import {
+  api,
+  TenantProfile,
+  UserProfile,
+  getApiBaseUrl,
+  BaileysConnectionStatus,
+  ShopifyIntegrationStatus,
+} from '@/lib/api';
 
 interface NavItem {
   label: string;
@@ -56,6 +63,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [apiHealth, setApiHealth] = useState<'checking' | 'healthy' | 'offline'>('checking');
   const [tenant, setTenant] = useState<TenantProfile | null>(null);
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
+  const [waStatus, setWaStatus] = useState<BaileysConnectionStatus | null>(null);
+  const [shopifyStatus, setShopifyStatus] = useState<ShopifyIntegrationStatus | null>(null);
   const [isOnline, setIsOnline] = useState(true);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [showInstallPrompt, setShowInstallPrompt] = useState(false);
@@ -96,7 +105,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     setDeferredPrompt(null);
   };
 
-  // Live health and Tenant Profile fetch
+  // Live health, WhatsApp, and Store Profile fetch
   useEffect(() => {
     let isMounted = true;
 
@@ -106,12 +115,24 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         const res = await fetch(`${apiUrl}/api/v1/health`, { cache: 'no-store' });
         if (res.ok) {
           if (isMounted) setApiHealth('healthy');
-          // Fetch authenticated store & user context
+          // Fetch authenticated store, user context, and live WhatsApp status
           try {
-            const me = await api.getMe();
+            const [meRes, waRes, shopifyRes] = await Promise.allSettled([
+              api.getMe(),
+              api.getWhatsAppStatus(),
+              api.getShopifyStatus(),
+            ]);
             if (isMounted) {
-              setTenant(me.tenant);
-              setCurrentUser(me.user);
+              if (meRes.status === 'fulfilled') {
+                setTenant(meRes.value.tenant);
+                setCurrentUser(meRes.value.user);
+              }
+              if (waRes.status === 'fulfilled' && waRes.value?.data) {
+                setWaStatus(waRes.value.data);
+              }
+              if (shopifyRes.status === 'fulfilled') {
+                setShopifyStatus(shopifyRes.value);
+              }
             }
           } catch (e) {
             // Handshake in progress
@@ -125,7 +146,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     };
 
     checkSystem();
-    const interval = setInterval(checkSystem, 25000);
+    const interval = setInterval(checkSystem, 10000);
     return () => {
       isMounted = false;
       clearInterval(interval);
@@ -174,17 +195,30 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
 
         {/* Real Tenant / Store Context */}
-        <div className="p-3.5 mx-3 my-3 rounded-lg bg-slate-50 border border-slate-200/80">
+        <Link
+          href="/shopify"
+          className="p-3.5 mx-3 my-3 rounded-lg bg-slate-50 hover:bg-slate-100/80 border border-slate-200/80 block transition-all"
+        >
           <div className="flex items-center justify-between">
             <div className="truncate">
               <p className="text-[10px] uppercase tracking-wider font-semibold text-slate-400">Connected Store</p>
               <p className="text-xs font-bold text-navy-900 truncate">
-                {tenant ? tenant.name : 'ByteForge Store'}
+                {shopifyStatus?.connected && shopifyStatus.integration
+                  ? shopifyStatus.integration.shopDomain
+                  : 'No Store Connected'}
               </p>
             </div>
-            <div className="w-2 h-2 rounded-full bg-emerald-500 ring-4 ring-emerald-50" title="Connected" />
+            <div
+              className={cn(
+                'w-2 h-2 rounded-full',
+                shopifyStatus?.connected
+                  ? 'bg-emerald-500 ring-4 ring-emerald-50'
+                  : 'bg-rose-500 ring-4 ring-rose-50'
+              )}
+              title={shopifyStatus?.connected ? 'Shopify Store Connected' : 'No Store Connected'}
+            />
           </div>
-        </div>
+        </Link>
 
         {/* Navigation Links */}
         <nav className="flex-1 px-3 space-y-1 overflow-y-auto">
@@ -395,16 +429,57 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </span>
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
+            {/* Database status */}
             <div className="flex items-center gap-2 text-xs text-slate-600 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200">
-              <span className="w-2 h-2 rounded-full bg-emerald-500" />
-              <span>PostgreSQL: <strong>Connected</strong></span>
+              <span
+                className={cn(
+                  'w-2 h-2 rounded-full',
+                  apiHealth === 'healthy' ? 'bg-emerald-500' : 'bg-rose-500'
+                )}
+              />
+              <span>PostgreSQL: <strong>{apiHealth === 'healthy' ? 'Connected' : 'Offline'}</strong></span>
             </div>
 
-            <div className="flex items-center gap-2 text-xs text-slate-600 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200">
-              <span className="w-2 h-2 rounded-full bg-emerald-500" />
-              <span>WhatsApp Web: <strong>Active</strong></span>
-            </div>
+            {/* Real WhatsApp Status */}
+            <Link
+              href="/whatsapp"
+              className={cn(
+                'flex items-center gap-2 text-xs px-3 py-1.5 rounded-lg border transition-all hover:shadow-xs',
+                waStatus?.status === 'CONNECTED'
+                  ? 'bg-emerald-50/80 text-emerald-800 border-emerald-200 hover:bg-emerald-100/80'
+                  : waStatus?.status === 'QR_REQUIRED'
+                  ? 'bg-amber-50/80 text-amber-800 border-amber-200 hover:bg-amber-100/80 animate-pulse'
+                  : waStatus?.status === 'CONNECTING' || waStatus?.status === 'RECONNECTING'
+                  ? 'bg-sky-50/80 text-sky-800 border-sky-200 hover:bg-sky-100/80'
+                  : 'bg-rose-50/80 text-rose-800 border-rose-200 hover:bg-rose-100/80'
+              )}
+            >
+              <span
+                className={cn(
+                  'w-2 h-2 rounded-full',
+                  waStatus?.status === 'CONNECTED'
+                    ? 'bg-emerald-500'
+                    : waStatus?.status === 'QR_REQUIRED'
+                    ? 'bg-amber-500'
+                    : waStatus?.status === 'CONNECTING' || waStatus?.status === 'RECONNECTING'
+                    ? 'bg-sky-500 animate-pulse'
+                    : 'bg-rose-500'
+                )}
+              />
+              <span>
+                WhatsApp Web:{' '}
+                <strong>
+                  {waStatus?.status === 'CONNECTED'
+                    ? `Connected (+${waStatus.displayPhoneNumber || 'Active'})`
+                    : waStatus?.status === 'QR_REQUIRED'
+                    ? 'Scan QR Code'
+                    : waStatus?.status === 'CONNECTING' || waStatus?.status === 'RECONNECTING'
+                    ? 'Connecting...'
+                    : 'Disconnected'}
+                </strong>
+              </span>
+            </Link>
           </div>
         </div>
 

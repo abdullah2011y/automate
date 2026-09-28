@@ -28,7 +28,9 @@ import {
   Activity,
   Layers,
   ChevronRight,
+  RotateCcw,
 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import {
   api,
   BaileysConnectionStatus,
@@ -195,6 +197,20 @@ export default function WhatsAppPage() {
       setActionMessage({ type: 'success', text: res.message });
     } catch (err: any) {
       setActionMessage({ type: 'error', text: err.message || 'Failed to disconnect' });
+    } finally {
+      setIsActionLoading(false);
+    }
+  };
+
+  const handleResetSession = async () => {
+    if (!confirm('Are you sure you want to completely reset WhatsApp session? This will wipe stored keys in PostgreSQL and generate a completely fresh pairing QR code.')) return;
+    setIsActionLoading(true);
+    setActionMessage(null);
+    try {
+      const res = await api.resetWhatsAppSession();
+      setActionMessage({ type: 'success', text: res.message || 'Session reset. Generating fresh QR code...' });
+    } catch (err: any) {
+      setActionMessage({ type: 'error', text: err.message || 'Failed to reset session' });
     } finally {
       setIsActionLoading(false);
     }
@@ -460,8 +476,23 @@ Cancel karne ke liye CANCEL reply karein.`,
           {/* Left Column: QR Code Display or Connected State */}
           <div className="lg:col-span-6 bg-slate-900/80 border border-slate-800 rounded-2xl p-6 flex flex-col items-center justify-center text-center relative overflow-hidden">
             <div className="absolute top-4 left-4 flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-              <span className="text-xs font-semibold text-slate-400 tracking-wider uppercase">Live Pairing Channel</span>
+              <span
+                className={cn(
+                  'w-2.5 h-2.5 rounded-full',
+                  statusData?.status === 'CONNECTED'
+                    ? 'bg-emerald-500'
+                    : statusData?.status === 'QR_REQUIRED'
+                    ? 'bg-amber-500 animate-pulse'
+                    : 'bg-rose-500'
+                )}
+              />
+              <span className="text-xs font-semibold text-slate-300 tracking-wider uppercase">
+                {statusData?.status === 'CONNECTED'
+                  ? 'WhatsApp Connected'
+                  : statusData?.status === 'QR_REQUIRED'
+                  ? 'Awaiting QR Scan'
+                  : 'Disconnected'}
+              </span>
             </div>
 
             {statusData?.status === 'CONNECTED' ? (
@@ -492,14 +523,22 @@ Cancel karne ke liye CANCEL reply karein.`,
                   </div>
                 </div>
 
-                <div className="flex gap-3 w-full">
+                <div className="flex flex-col sm:flex-row gap-3 w-full">
                   <button
                     onClick={handleReconnect}
                     disabled={isActionLoading}
                     className="flex-1 py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl font-medium text-sm transition flex items-center justify-center gap-2"
                   >
                     <RefreshCw className="w-4 h-4" />
-                    Regenerate Session
+                    Refresh
+                  </button>
+                  <button
+                    onClick={handleResetSession}
+                    disabled={isActionLoading}
+                    className="flex-1 py-2.5 px-4 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-xl font-medium text-sm transition flex items-center justify-center gap-2"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                    Reset Session
                   </button>
                   <button
                     onClick={handleDisconnect}
@@ -512,7 +551,7 @@ Cancel karne ke liye CANCEL reply karein.`,
                 </div>
               </div>
             ) : statusData?.qrCode ? (
-              <div className="py-6 flex flex-col items-center">
+              <div className="py-6 flex flex-col items-center max-w-sm">
                 <div className="bg-white p-4 rounded-2xl shadow-2xl mb-4 border-4 border-slate-800">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
@@ -521,18 +560,38 @@ Cancel karne ke liye CANCEL reply karein.`,
                     className="w-64 h-64 sm:w-72 sm:h-72 object-contain"
                   />
                 </div>
-                <div className="flex items-center gap-2 text-xs text-amber-400 font-medium mb-4">
+                <div className="flex items-center gap-2 text-xs text-amber-400 font-medium mb-3">
                   <Clock className="w-3.5 h-3.5 animate-spin" />
-                  QR refreshes automatically via Baileys multi-device protocol
+                  QR refreshes automatically via Baileys Multi-Device protocol
                 </div>
-                <button
-                  onClick={handleReconnect}
-                  disabled={isActionLoading}
-                  className="py-2 px-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold transition flex items-center gap-1.5 shadow-lg shadow-emerald-900/30"
-                >
-                  <RefreshCw className="w-3.5 h-3.5" />
-                  Force New QR
-                </button>
+
+                <div className="p-3 bg-slate-950/80 border border-amber-500/30 rounded-xl text-left text-xs text-amber-200/90 mb-4 space-y-1">
+                  <p className="font-bold flex items-center gap-1.5 text-amber-400">
+                    <AlertTriangle className="w-3.5 h-3.5" /> Agr phone par &quot;Couldn&apos;t link device&quot; aaye:
+                  </p>
+                  <p className="text-[11px] text-slate-400">
+                    Neeche <strong>&quot;Reset &amp; Clean Session&quot;</strong> button click karein. Yeh puranay cached keys ko database se delete karke bilkul fresh pairing QR bana dega.
+                  </p>
+                </div>
+
+                <div className="flex gap-2.5 w-full">
+                  <button
+                    onClick={handleReconnect}
+                    disabled={isActionLoading}
+                    className="flex-1 py-2 px-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-semibold transition flex items-center justify-center gap-1.5"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    New QR
+                  </button>
+                  <button
+                    onClick={handleResetSession}
+                    disabled={isActionLoading}
+                    className="flex-1 py-2 px-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold transition flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-900/30"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    Reset &amp; Clean Session
+                  </button>
+                </div>
               </div>
             ) : (
               <div className="py-16 flex flex-col items-center justify-center">
@@ -543,12 +602,21 @@ Cancel karne ke liye CANCEL reply karein.`,
                 <p className="text-xs text-slate-400 max-w-xs mb-4">
                   Initializing WhatsApp socket and loading Signal cryptographic keys from PostgreSQL.
                 </p>
-                <button
-                  onClick={handleReconnect}
-                  className="text-xs text-emerald-400 hover:underline font-medium"
-                >
-                  Click to reinitialize
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleReconnect}
+                    className="text-xs text-emerald-400 hover:underline font-medium"
+                  >
+                    Click to reinitialize
+                  </button>
+                  <span className="text-slate-600">|</span>
+                  <button
+                    onClick={handleResetSession}
+                    className="text-xs text-amber-400 hover:underline font-medium"
+                  >
+                    Reset Session
+                  </button>
+                </div>
               </div>
             )}
           </div>

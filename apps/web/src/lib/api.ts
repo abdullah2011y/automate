@@ -351,6 +351,12 @@ export const api = {
     });
   },
 
+  resetWhatsAppSession: (): Promise<{ success: boolean; message: string }> => {
+    return request('/whatsapp/reset', {
+      method: 'POST',
+    });
+  },
+
   resendWhatsAppConfirmation: (orderId: string): Promise<any> => {
     return request(`/whatsapp/resend/${orderId}`, {
       method: 'POST',
