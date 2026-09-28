@@ -8,6 +8,7 @@ import makeWASocket, {
   Browsers,
   decryptPollVote,
   makeCacheableSignalKeyStore,
+  getKeyAuthor,
 } from '@whiskeysockets/baileys';
 import pino from 'pino';
 import qrcode from 'qrcode';
@@ -16,6 +17,7 @@ import { prisma } from '../db/prisma';
 import { usePostgresAuthState } from './baileys-auth.service';
 import { TemplateService, PollOption, DEFAULT_POLL_OPTIONS } from './template.service';
 import { AutomationService } from './automation.service';
+import { ShopifyService } from './shopify.service';
 import {
   toWhatsAppJid,
   isCodGateway,
@@ -476,16 +478,16 @@ export class BaileysService {
         : DEFAULT_POLL_OPTIONS;
 
       let selectedOption: PollOption | null = null;
+      let selectedBuffers: (Uint8Array | Buffer)[] = [];
 
-      if (secretBase64 && this.sock) {
+      // Check if vote options were already decrypted by Baileys internal event
+      if (Array.isArray((pollUpdate.vote as any)?.selectedOptions) && (pollUpdate.vote as any).selectedOptions.length > 0) {
+        selectedBuffers = (pollUpdate.vote as any).selectedOptions;
+      } else if (secretBase64 && this.sock) {
         try {
           const meIdNormalised = jidNormalizedUser(this.sock.user?.id || '');
-          const pollCreatorJid = creationKey.fromMe
-            ? meIdNormalised
-            : (creationKey.participant || creationKey.remoteJid || meIdNormalised);
-          const voterJid = msg.key.fromMe
-            ? meIdNormalised
-            : (msg.key.participant || msg.key.remoteJid || `${phoneDigits}@s.whatsapp.net`);
+          const pollCreatorJid = getKeyAuthor(creationKey, meIdNormalised);
+          const voterJid = getKeyAuthor(msg.key, meIdNormalised);
 
           const decryptedVote = decryptPollVote(
             pollUpdate.vote,
@@ -497,33 +499,37 @@ export class BaileysService {
             }
           );
 
-          const selectedBuffers = decryptedVote.selectedOptions || [];
-          if (selectedBuffers.length === 0) {
-            this.log(`Customer +${phoneDigits} unselected/cleared poll choice.`);
-            return;
-          }
-
-          const selectedBuffer = Buffer.from(selectedBuffers[0]);
-
-          for (const opt of pollOptions) {
-            const hash = crypto.createHash('sha256').update(Buffer.from(opt.text)).digest();
-            if (selectedBuffer.equals(hash)) {
-              selectedOption = opt;
-              break;
-            }
-          }
+          selectedBuffers = decryptedVote.selectedOptions || [];
         } catch (decryptErr: any) {
           this.log(`Decryption error for poll vote: ${decryptErr.message}`, 'error');
         }
       }
 
-      // Fallback: If decryption could not match, default to first option
-      if (!selectedOption && pollOptions.length > 0) {
-        this.log(`Could not directly map option hash, defaulting to first option for +${phoneDigits}`, 'warn');
-        selectedOption = pollOptions[0];
+      if (selectedBuffers.length === 0) {
+        this.log(`Customer +${phoneDigits} unselected or cleared poll choice.`);
+        return;
       }
 
-      if (!selectedOption) return;
+      const selectedBuffer = Buffer.from(selectedBuffers[0]);
+
+      // Match selected SHA-256 hash against configured poll option texts and IDs
+      for (const opt of pollOptions) {
+        const rawHash = crypto.createHash('sha256').update(Buffer.from(opt.text)).digest();
+        const trimmedHash = crypto.createHash('sha256').update(Buffer.from(opt.text.trim())).digest();
+        const idHash = crypto.createHash('sha256').update(Buffer.from(opt.id)).digest();
+        if (selectedBuffer.equals(rawHash) || selectedBuffer.equals(trimmedHash) || selectedBuffer.equals(idHash)) {
+          selectedOption = opt;
+          break;
+        }
+      }
+
+      if (!selectedOption) {
+        this.log(
+          `Could not map vote hash to configured options for +${phoneDigits}. Available options: ${pollOptions.map((o) => o.text).join(', ')}`,
+          'warn'
+        );
+        return;
+      }
 
       this.log(`Customer +${phoneDigits} tapped poll option: "${selectedOption.text}" (Status ID: ${selectedOption.id})`);
 
@@ -531,12 +537,25 @@ export class BaileysService {
       const tenantId = dbMsg.tenantId;
       const now = new Date();
 
-      // Determine target confirmation status from option.id
+      // Determine target confirmation status from option.id and text
       let targetStatus: OrderConfirmationStatus = OrderConfirmationStatus.CONFIRMED;
       const upperStatus = selectedOption.id.toUpperCase();
-      if (upperStatus === 'CANCELLED' || upperStatus === 'CANCEL') {
+      const lowerText = selectedOption.text.toLowerCase();
+
+      if (
+        upperStatus === 'CANCELLED' ||
+        upperStatus === 'CANCEL' ||
+        upperStatus === 'NO' ||
+        lowerText.includes('cancel') ||
+        lowerText.includes('reject')
+      ) {
         targetStatus = OrderConfirmationStatus.CANCELLED;
-      } else if (upperStatus === 'CONFIRMED' || upperStatus === 'CONFIRM') {
+      } else if (
+        upperStatus === 'CONFIRMED' ||
+        upperStatus === 'CONFIRM' ||
+        upperStatus === 'YES' ||
+        lowerText.includes('confirm')
+      ) {
         targetStatus = OrderConfirmationStatus.CONFIRMED;
       } else if (Object.values(OrderConfirmationStatus).includes(upperStatus as OrderConfirmationStatus)) {
         targetStatus = upperStatus as OrderConfirmationStatus;
@@ -606,6 +625,17 @@ export class BaileysService {
           },
         });
       });
+
+      // Synchronize updated status tag to Shopify Admin
+      if (targetOrder.shopifyOrderId) {
+        ShopifyService.updateShopifyOrderStatus(
+          tenantId,
+          targetOrder.shopifyOrderId,
+          targetStatus === OrderConfirmationStatus.CANCELLED ? 'CANCELLED' : 'CONFIRMED'
+        ).catch((syncErr) => {
+          this.log(`Failed to sync status to Shopify for order ${targetOrder.shopifyOrderNumber}: ${syncErr.message}`, 'warn');
+        });
+      }
 
       this.log(`Order ${targetOrder.shopifyOrderNumber} successfully updated to ${targetStatus} from WhatsApp Poll tap! (Auto-reply is fully turned OFF)`);
     } catch (err: any) {

@@ -614,4 +614,58 @@ export class ShopifyService {
       throw err;
     }
   }
+
+  /**
+   * Updates order tags and note on Shopify Admin when order status is updated via WhatsApp Poll.
+   */
+  public static async updateShopifyOrderStatus(
+    tenantId: string,
+    shopifyOrderId: string,
+    status: 'CONFIRMED' | 'CANCELLED'
+  ) {
+    try {
+      const integration = await prisma.shopifyIntegration.findUnique({
+        where: { tenantId },
+      });
+      if (!integration || !integration.isActive) return;
+
+      const token = decryptCredential(integration.encryptedAccessToken);
+      const apiVersion = config.SHOPIFY_API_VERSION || '2025-01';
+      const endpoint = `https://${integration.shopDomain}/admin/api/${apiVersion}/orders/${shopifyOrderId}.json`;
+
+      const getRes = await fetch(endpoint, {
+        headers: {
+          'X-Shopify-Access-Token': token,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!getRes.ok) return;
+      const getJson: any = await getRes.json();
+      const existingTags = getJson.order?.tags || '';
+
+      const newTag = status === 'CONFIRMED' ? 'WhatsApp-Confirmed' : 'WhatsApp-Cancelled';
+      const tagsArray = existingTags.split(',').map((t: string) => t.trim()).filter(Boolean);
+      if (!tagsArray.includes(newTag)) {
+        tagsArray.push(newTag);
+      }
+
+      await fetch(endpoint, {
+        method: 'PUT',
+        headers: {
+          'X-Shopify-Access-Token': token,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          order: {
+            id: Number(shopifyOrderId),
+            tags: tagsArray.join(', '),
+            note: `${getJson.order?.note || ''}\n[WhatsApp Automation] Order marked as ${status} on ${new Date().toLocaleString()}`.trim(),
+          },
+        }),
+      });
+    } catch (err: any) {
+      console.warn(`[Shopify Sync] Could not sync ${status} status to Shopify order ${shopifyOrderId}:`, err.message);
+    }
+  }
 }
