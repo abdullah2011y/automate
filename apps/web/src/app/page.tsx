@@ -95,57 +95,43 @@ export default function DashboardPage() {
     fetchAnalytics();
   }, []);
 
-  // Default fallback matching screenshot data
+  // Dynamic metrics from live database (pure 0s when database is wiped fresh)
   const metrics = {
-    totalOrders: data?.summary?.totalOrders ?? 2,
-    pending: data?.summary?.pendingConfirmation ?? 3,
+    totalOrders: data?.summary?.totalOrdersInRange ?? data?.summary?.totalOrders ?? 0,
+    pending: data?.summary?.pendingConfirmation ?? 0,
     confirmed: data?.summary?.confirmed ?? 0,
     confirmedRevenue: data?.summary?.confirmedTotalValue ? `Rs. ${data.summary.confirmedTotalValue}` : 'Rs. 0.00',
     cancelled: data?.summary?.cancelled ?? 0,
     cancelledSaved: data?.summary?.savedFromReturnsValue ? `Rs. ${data.summary.savedFromReturnsValue}` : 'Rs. 0.00',
   };
 
-  // Orders matching screenshot
-  const recentOrders = [
-    {
-      id: 'BF-1003',
-      customer: 'Ali Raza',
-      source: 'Shopify',
-      sourceType: 'shopify',
-      status: 'Pending',
-      amount: 'Rs. 2,499',
-      date: '29 Sep, 6:12 PM',
-    },
-    {
-      id: 'BF-1002',
-      customer: 'Usman Khan',
-      source: 'Website',
-      sourceType: 'website',
-      status: 'Pending',
-      amount: 'Rs. 1,899',
-      date: '28 Sep, 4:21 PM',
-    },
-    {
-      id: 'BF-1001',
-      customer: 'Hassan Ahmed',
-      source: 'WhatsApp',
-      sourceType: 'whatsapp',
-      status: 'Pending',
-      amount: 'Rs. 2,199',
-      date: '27 Sep, 2:18 PM',
-    },
-  ];
+  // Live recent orders mapped directly from PostgreSQL
+  const recentOrders = (data?.recentOrders || []).map((ord) => ({
+    id: ord.shopifyOrderNumber || `#${ord.id.slice(0, 6)}`,
+    customer: ord.customerName || 'Customer',
+    source: 'Shopify',
+    sourceType: 'shopify',
+    status: ord.status === 'CONFIRMED' ? 'Confirmed' : ord.status === 'CANCELLED' ? 'Cancelled' : 'Pending',
+    amount: ord.totalPrice ? (ord.totalPrice.startsWith('Rs') ? ord.totalPrice : `Rs. ${ord.totalPrice}`) : 'Rs. 0.00',
+    date: ord.time ? new Date(ord.time).toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Just now',
+  }));
 
-  // 7-day trend bars matching screenshot
-  const trendBars = [
-    { day: '23 Sep', value: 0.3, orders: 0 },
-    { day: '24 Sep', value: 1.0, orders: 1 },
-    { day: '25 Sep', value: 0.9, orders: 1 },
-    { day: '26 Sep', value: 0.2, orders: 0 },
-    { day: '27 Sep', value: 1.1, orders: 1 },
-    { day: '28 Sep', value: 2.4, orders: 2 },
-    { day: '29 Sep', value: 3.8, orders: 3 },
-  ];
+  // Dynamic 7-day trend bars from database
+  const trendBars = (data?.trends && data.trends.length > 0)
+    ? data.trends.map((t) => ({
+        day: t.label.split(' ')[1] || t.label,
+        orders: t.totalOrders,
+        value: t.totalOrders,
+      }))
+    : [
+        { day: '23 Sep', value: 0, orders: 0 },
+        { day: '24 Sep', value: 0, orders: 0 },
+        { day: '25 Sep', value: 0, orders: 0 },
+        { day: '26 Sep', value: 0, orders: 0 },
+        { day: '27 Sep', value: 0, orders: 0 },
+        { day: '28 Sep', value: 0, orders: 0 },
+        { day: '29 Sep', value: 0, orders: 0 },
+      ];
 
   return (
     <div className="space-y-6 pb-12">
@@ -294,46 +280,68 @@ export default function DashboardPage() {
             </Link>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead>
-                <tr className="text-slate-400 text-[11px] font-semibold border-b border-[#1A2234]">
-                  <th className="py-2.5 pr-4">#</th>
-                  <th className="py-2.5 px-3">Customer</th>
-                  <th className="py-2.5 px-3">Source</th>
-                  <th className="py-2.5 px-3">Status</th>
-                  <th className="py-2.5 px-3">Amount</th>
-                  <th className="py-2.5 pl-3 text-right">Date</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#161F33]">
-                {recentOrders.map((ord) => (
-                  <tr key={ord.id} className="hover:bg-[#121A2E] transition-colors group">
-                    <td className="py-3.5 pr-4 font-semibold text-[#8B5CF6] group-hover:underline cursor-pointer">
-                      <Link href="/orders">{ord.id}</Link>
-                    </td>
-                    <td className="py-3.5 px-3 font-medium text-white">{ord.customer}</td>
-                    <td className="py-3.5 px-3">
-                      <span className="inline-flex items-center gap-1.5 text-slate-300">
-                        {ord.sourceType === 'shopify' && <ShopifyIcon className="w-4 h-4" />}
-                        {ord.sourceType === 'website' && <Globe className="w-4 h-4 text-blue-400" />}
-                        {ord.sourceType === 'whatsapp' && <WhatsAppIcon className="w-4 h-4 text-emerald-400" />}
-                        <span>{ord.source}</span>
-                      </span>
-                    </td>
-                    <td className="py-3.5 px-3">
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-[#36270E] text-[#FBBF24] border border-[#F59E0B]/30">
-                        <span className="w-1.5 h-1.5 rounded-full bg-[#F59E0B]" />
-                        {ord.status}
-                      </span>
-                    </td>
-                    <td className="py-3.5 px-3 font-semibold text-white">{ord.amount}</td>
-                    <td className="py-3.5 pl-3 text-right text-slate-400 text-[11px]">{ord.date}</td>
+          {loading ? (
+            <div className="py-12 text-center text-slate-500 text-xs">
+              <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-[#8B5CF6]" />
+              Fetching live store analytics...
+            </div>
+          ) : recentOrders.length === 0 ? (
+            <div className="py-10 px-4 text-center">
+              <Package className="w-9 h-9 text-slate-600 mx-auto mb-2 opacity-60" />
+              <p className="text-xs font-semibold text-slate-300">No Orders in Database</p>
+              <p className="text-[11px] text-slate-500 mt-1 max-w-sm mx-auto">
+                Orders will automatically be captured here in real-time as customers check out on Shopify.
+              </p>
+              <Link
+                href="/shopify"
+                className="inline-flex items-center gap-1.5 mt-3 px-3 py-1.5 rounded-lg bg-[#6366F1] text-white text-[11px] font-semibold hover:bg-[#4F46E5] transition-colors shadow-sm"
+              >
+                <RefreshCw className="w-3 h-3" />
+                Sync Store Orders
+              </Link>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="text-slate-400 text-[11px] font-semibold border-b border-[#1A2234]">
+                    <th className="py-2.5 pr-4">#</th>
+                    <th className="py-2.5 px-3">Customer</th>
+                    <th className="py-2.5 px-3">Source</th>
+                    <th className="py-2.5 px-3">Status</th>
+                    <th className="py-2.5 px-3">Amount</th>
+                    <th className="py-2.5 pl-3 text-right">Date</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className="divide-y divide-[#161F33]">
+                  {recentOrders.map((ord) => (
+                    <tr key={ord.id} className="hover:bg-[#121A2E] transition-colors group">
+                      <td className="py-3.5 pr-4 font-semibold text-[#8B5CF6] group-hover:underline cursor-pointer">
+                        <Link href="/orders">{ord.id}</Link>
+                      </td>
+                      <td className="py-3.5 px-3 font-medium text-white">{ord.customer}</td>
+                      <td className="py-3.5 px-3">
+                        <span className="inline-flex items-center gap-1.5 text-slate-300">
+                          {ord.sourceType === 'shopify' && <ShopifyIcon className="w-4 h-4" />}
+                          {ord.sourceType === 'website' && <Globe className="w-4 h-4 text-blue-400" />}
+                          {ord.sourceType === 'whatsapp' && <WhatsAppIcon className="w-4 h-4 text-emerald-400" />}
+                          <span>{ord.source}</span>
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-3">
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-[#36270E] text-[#FBBF24] border border-[#F59E0B]/30">
+                          <span className="w-1.5 h-1.5 rounded-full bg-[#F59E0B]" />
+                          {ord.status}
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-3 font-semibold text-white">{ord.amount}</td>
+                      <td className="py-3.5 pl-3 text-right text-slate-400 text-[11px]">{ord.date}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
         {/* Right: Quick Actions (4 cols on lg) */}

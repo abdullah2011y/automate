@@ -27,6 +27,7 @@
     "db:backup": "npm --prefix apps/api run db:backup",
     "db:restore": "npm --prefix apps/api run db:restore",
     "db:archive": "npm --prefix apps/api run db:archive",
+    "db:purge": "node scripts/purge-all-data.js",
     "lint": "npm --prefix apps/web run lint && npm --prefix apps/api run lint"
   },
   "keywords": [
