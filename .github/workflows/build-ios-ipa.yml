@@ -26,10 +26,10 @@ jobs:
           node-version: 20
           cache: 'npm'
 
-      - name: Select Xcode Version
+      - name: Verify Xcode Environment
         run: |
-          sudo xcode-select -s /Applications/Xcode.app
           xcodebuild -version
+          xcrun --show-sdk-path --sdk iphoneos
 
       - name: Install Workspace Dependencies
         run: npm ci
@@ -46,34 +46,36 @@ jobs:
       - name: Install CocoaPods
         run: |
           cd apps/web/ios/App
-          pod install --repo-update
+          pod install
 
       - name: Compile and Archive iOS App Scheme
         run: |
           cd apps/web/ios/App
           
-          # Clean build folder
+          # Clean build artifacts
           xcodebuild clean \
             -workspace App.xcworkspace \
             -scheme App \
             -configuration Release
           
-          # Build archive with signing disabled for Sideloadly signing
+          # Archive build for generic iOS device with code signing disabled for Sideloadly
           xcodebuild archive \
             -workspace App.xcworkspace \
             -scheme App \
             -configuration Release \
+            -destination "generic/platform=iOS" \
             -archivePath build/App.xcarchive \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY=""
+            CODE_SIGN_IDENTITY="" \
+            AD_HOC_CODE_SIGNING_ALLOWED=YES
 
       - name: Package Payload and Create ByteForge.ipa
         run: |
           cd apps/web/ios/App
           mkdir -p build/ipa/Payload
           
-          # Copy the compiled App.app bundle (contains real Mach-O executable)
+          # Copy the compiled App.app bundle containing the real Mach-O binary
           cp -R build/App.xcarchive/Products/Applications/App.app build/ipa/Payload/
           
           cd build/ipa
@@ -85,7 +87,12 @@ jobs:
           cd apps/web/ios/App/build/ipa
           
           echo "======================================================="
-          echo "🔍 1. Verifying Processed Info.plist Keys:"
+          echo "🔍 1. Inspecting Payload Architecture:"
+          echo "======================================================="
+          unzip -l ByteForge.ipa | grep "Payload/App.app/" | head -n 30
+          
+          echo "======================================================="
+          echo "🔍 2. Verifying Processed Info.plist Keys:"
           echo "======================================================="
           unzip -p ByteForge.ipa Payload/App.app/Info.plist > /tmp/target_info.plist
           plutil -p /tmp/target_info.plist | grep -E "CFBundleExecutable|CFBundleIdentifier|CFBundleDisplayName|CFBundleName"
@@ -103,7 +110,7 @@ jobs:
           fi
           
           echo "======================================================="
-          echo "🔍 2. Verifying Real Mach-O Binary:"
+          echo "🔍 3. Verifying Real Mach-O Binary:"
           echo "======================================================="
           mkdir -p /tmp/verify_app
           unzip -q ByteForge.ipa -d /tmp/verify_app
@@ -118,7 +125,7 @@ jobs:
           file "$BINARY_PATH"
           
           echo "======================================================="
-          echo "✅ VERIFICATION PASSED: Real Mach-O Binary Verified!"
+          echo "✅ VERIFICATION PASSED: Sideloadly-Ready IPA Validated!"
           echo "======================================================="
 
       - name: Upload Verified IPA Artifact
