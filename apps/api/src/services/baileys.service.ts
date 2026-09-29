@@ -96,7 +96,7 @@ export class BaileysService {
 
         if (dbMsg.messageType === 'poll' || p.hasPoll) {
           const opts = Array.isArray(p.pollOptions) ? p.pollOptions : [];
-          const pollTitle = (p.pollQuestion || p.body || 'Order Confirmation').trim();
+          const pollTitle = (p.pollQuestion || 'Aapka order confirm karein:').trim();
           const safeTitle = pollTitle.length > 245 ? pollTitle.slice(0, 242) + '...' : pollTitle;
 
           const reconstructed: proto.IMessage = {
@@ -1219,21 +1219,26 @@ export class BaileysService {
           const pollOptions: PollOption[] = params.pollOptions || DEFAULT_POLL_OPTIONS;
 
           if (hasPoll && pollOptions.length >= 2) {
-            // Send EXACTLY ONE message: The WhatsApp Poll containing the message body + tap buttons
-            const pollQuestionText = params.pollQuestion ? String(params.pollQuestion).trim() : '';
-            const fullPollName = pollQuestionText && !bodyText.includes(pollQuestionText)
-              ? `${bodyText}\n\n${pollQuestionText}`
-              : bodyText;
+            // 1. Send the FULL, complete, untruncated message body as a standard text message.
+            // No matter how big the template is, 100% of the customer details, products, and notes are delivered!
+            const textSent = await this.sock.sendMessage(jid, { text: bodyText });
+            const textWamid = textSent?.key?.id || `baileys_text_${Date.now()}`;
+            if (textSent?.message) {
+              this.cacheMessage(textWamid, textSent.message);
+            }
 
-            // WhatsApp Poll questions have a hard protocol limit of 255 characters.
-            // Slicing at <= 245 characters guarantees 100% Protobuf schema validation and prevents decryption failure.
-            const safePollName = fullPollName.length > 245
-              ? fullPollName.slice(0, 242) + '...'
-              : fullPollName;
+            // Brief delay between text and poll so WhatsApp orders them properly in conversation
+            await delay(400);
+
+            // 2. Send the interactive confirmation Poll containing the question and options
+            const pollQuestionText = (params.pollQuestion ? String(params.pollQuestion).trim() : '') || 'Aapka order confirm karein:';
+            const safePollQuestion = pollQuestionText.length > 245
+              ? pollQuestionText.slice(0, 242) + '...'
+              : pollQuestionText;
 
             const pollSent = await this.sock.sendMessage(jid, {
               poll: {
-                name: safePollName,
+                name: safePollQuestion,
                 values: pollOptions.map((opt: any) => opt.text),
                 selectableCount: 1,
               },
@@ -1250,7 +1255,7 @@ export class BaileysService {
               secretBase64 = Buffer.from(secretBuffer).toString('base64');
             }
           } else {
-            // When poll is disabled, send standard text message only
+            // When poll is disabled, send standard full text message only
             const textSent = await this.sock.sendMessage(jid, { text: bodyText });
             wamid = textSent?.key?.id || `baileys_${Date.now()}`;
             if (textSent?.message) {

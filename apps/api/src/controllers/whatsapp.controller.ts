@@ -284,21 +284,29 @@ export const testSendTemplate = async (
     const isPoll = hasPoll !== false && Array.isArray(pollOptions) && pollOptions.length >= 2;
 
     if (isPoll) {
-      const renderedPollQuestion = pollQuestion
-        ? TemplateService.render(pollQuestion, sampleVars).trim()
-        : '';
-      const fullPollName = renderedPollQuestion && !rendered.includes(renderedPollQuestion)
-        ? `${rendered}\n\n${renderedPollQuestion}`
-        : rendered;
+      // 1. Send the FULL, complete, untruncated message body as a standard text message.
+      // Guarantees 100% of the template text is delivered completely without ANY '...' cut-off!
+      await BaileysService.sendDirectMessage(recipientPhone, rendered);
 
-      // Send single poll message containing full text and options
+      // Brief delay for message sequencing
+      await new Promise((resolve) => setTimeout(resolve, 400));
+
+      // 2. Send the interactive confirmation poll with the question and options
+      const renderedPollQuestion = (pollQuestion
+        ? TemplateService.render(pollQuestion, sampleVars).trim()
+        : '') || 'Aapka order confirm karein:';
+
+      const safeQuestion = renderedPollQuestion.length > 245
+        ? renderedPollQuestion.slice(0, 242) + '...'
+        : renderedPollQuestion;
+
       await BaileysService.sendDirectPoll(
         recipientPhone,
-        fullPollName,
+        safeQuestion,
         pollOptions.map((o: any) => o.text)
       );
     } else {
-      // Standard text message only
+      // Standard full text message only
       await BaileysService.sendDirectMessage(recipientPhone, rendered);
     }
 
