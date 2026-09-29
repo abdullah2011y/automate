@@ -3,33 +3,33 @@
 @tailwind utilities;
 
 :root {
-  --background: 210 40% 98%;    /* Clean Light Gray #f8fafc */
-  --foreground: 222 47% 11%;    /* Dark Navy #0a192f */
+  --background: 222 47% 7%;      /* #090D16 Deep Dark */
+  --foreground: 210 40% 98%;      /* #F8FAFC Crisp Light */
 
-  --card: 0 0% 100%;            /* Pure White card */
-  --card-foreground: 222 47% 11%;
+  --card: 222 45% 10%;            /* #0F1422 Dark Card Surface */
+  --card-foreground: 210 40% 98%;
 
-  --popover: 0 0% 100%;
-  --popover-foreground: 222 47% 11%;
+  --popover: 222 45% 10%;
+  --popover-foreground: 210 40% 98%;
 
-  --primary: 189 97% 49%;        /* Electric Cyan #04D3F7 */
-  --primary-foreground: 222 47% 11%;
+  --primary: 263 70% 58%;         /* #7C3AED Royal ByteForge Purple */
+  --primary-foreground: 0 0% 100%;
 
-  --secondary: 214 32% 91%;
-  --secondary-foreground: 222 47% 11%;
+  --secondary: 222 35% 15%;       /* #161D2E */
+  --secondary-foreground: 210 40% 98%;
 
-  --muted: 210 40% 96.1%;
-  --muted-foreground: 215.4 16.3% 46.9%;
+  --muted: 222 35% 14%;
+  --muted-foreground: 215 20% 65%;
 
-  --accent: 189 97% 95%;
-  --accent-foreground: 189 97% 35%;
+  --accent: 263 70% 58%;
+  --accent-foreground: 0 0% 100%;
 
-  --destructive: 0 84.2% 60.2%;
+  --destructive: 0 84% 60%;
   --destructive-foreground: 210 40% 98%;
 
-  --border: 214.3 31.8% 91.4%;
-  --input: 214.3 31.8% 91.4%;
-  --ring: 189 97% 49%;
+  --border: 222 30% 16%;          /* #1B2336 Dark Slate Border */
+  --input: 222 30% 16%;
+  --ring: 263 70% 58%;
 
   --radius: 0.75rem;
 }
@@ -43,8 +43,8 @@ html,
 body {
   margin: 0;
   padding: 0;
-  background-color: hsl(var(--background));
-  color: hsl(var(--foreground));
+  background-color: #090D16;
+  color: #F8FAFC;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -79,21 +79,80 @@ button, a, input, select {
   touch-action: manipulation;
 }
 
-/* Custom scrollbars */
+/* Custom dark scrollbars matching screenshots */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #f1f5f9;
+  background: #090D16;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+  background: #1B2336;
   border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: #2A3650;
 }
+
+/* Global Dark Theme mappings to ensure every page matches the screenshots */
+.bg-white {
+  background-color: #0D1322 !important;
+}
+
+.border-slate-200,
+.border-slate-200\/80,
+.border-slate-200\/90,
+.border-slate-300 {
+  border-color: #1E2638 !important;
+}
+
+.border-slate-100 {
+  border-color: #161F33 !important;
+}
+
+.text-navy-900 {
+  color: #FFFFFF !important;
+}
+
+.text-slate-800,
+.text-slate-700 {
+  color: #E2E8F0 !important;
+}
+
+.text-slate-600 {
+  color: #CBD5E1 !important;
+}
+
+.bg-slate-50,
+.bg-slate-50\/70,
+.bg-slate-50\/80 {
+  background-color: #111827 !important;
+}
+
+.bg-slate-100 {
+  background-color: #161F33 !important;
+}
+
+.hover\:bg-slate-50:hover,
+.hover\:bg-slate-50\/70:hover,
+.hover\:bg-slate-50\/80:hover {
+  background-color: #161F33 !important;
+}
+
+.divide-slate-100 > :not([hidden]) ~ :not([hidden]),
+.divide-slate-200 > :not([hidden]) ~ :not([hidden]) {
+  border-color: #1A2234 !important;
+}
+
+input,
+select,
+textarea {
+  background-color: #111827 !important;
+  color: #FFFFFF !important;
+  border-color: #1E293B !important;
+}
+

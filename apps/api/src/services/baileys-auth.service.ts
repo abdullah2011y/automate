@@ -86,7 +86,7 @@ export async function usePostgresAuthState(
     },
 
     set: async (data: any): Promise<void> => {
-      const tasks: Promise<any>[] = [];
+      const operations: Array<() => Promise<any>> = [];
 
       for (const category of Object.keys(data)) {
         const categoryData = data[category];
@@ -96,7 +96,7 @@ export async function usePostgresAuthState(
 
           if (value === null || value === undefined) {
             // Delete key
-            tasks.push(
+            operations.push(() =>
               prisma.whatsAppSession
                 .deleteMany({
                   where: { sessionId, key: dbKey },
@@ -108,7 +108,7 @@ export async function usePostgresAuthState(
             const serialized = JSON.stringify(value, BufferJSON.replacer);
             const encrypted = encryptCredential(serialized);
 
-            tasks.push(
+            operations.push(() =>
               prisma.whatsAppSession.upsert({
                 where: {
                   sessionId_key: { sessionId, key: dbKey },
@@ -127,7 +127,12 @@ export async function usePostgresAuthState(
         }
       }
 
-      await Promise.all(tasks);
+      // Execute in controlled chunks of 15 to prevent PostgreSQL connection pool exhaustion
+      const CHUNK_SIZE = 15;
+      for (let i = 0; i < operations.length; i += CHUNK_SIZE) {
+        const chunk = operations.slice(i, i + CHUNK_SIZE);
+        await Promise.all(chunk.map((fn) => fn()));
+      }
     },
 
     isInTransaction: () => false,

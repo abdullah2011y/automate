@@ -7,6 +7,7 @@
     "dev": "next dev -p 3000",
     "build": "next build",
     "build:cap": "cross-env CAPACITOR_BUILD=true next build",
+    "build:ipa": "node ../../scripts/build-ipa.js",
     "cap": "cap",
     "cap:add:ios": "cap add ios",
     "cap:sync": "cap sync ios",

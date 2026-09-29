@@ -14,11 +14,12 @@ export const metadata: Metadata = {
   },
   icons: {
     icon: [
-      { url: '/favicon.ico' },
-      { url: '/icons/icon.svg', type: 'image/svg+xml' },
+      { url: '/logo.png' },
+      { url: '/favicon.png' },
     ],
     apple: [
-      { url: '/icons/apple-touch-icon.png', sizes: '180x180' },
+      { url: '/apple-touch-icon.png', sizes: '180x180' },
+      { url: '/logo.png' },
     ],
   },
 };
@@ -28,7 +29,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   viewportFit: 'cover',
-  themeColor: '#0A192F',
+  themeColor: '#090D16',
 };
 
 export default function RootLayout({

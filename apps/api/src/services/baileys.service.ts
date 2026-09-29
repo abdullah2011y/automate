@@ -53,6 +53,8 @@ export class BaileysService {
   private static reconnectAttempts = 0;
   private static isExplicitlyStopped = false;
   private static reconnectTimer: NodeJS.Timeout | null = null;
+  private static queueWorkerTimer: NodeJS.Timeout | null = null;
+  private static watchdogTimer: NodeJS.Timeout | null = null;
   private static isSendingQueue = false;
   private static messageMemoryCache = new Map<string, proto.IMessage>();
 
@@ -137,12 +139,92 @@ export class BaileysService {
   }
 
   /**
+   * Starts background workers:
+   * 1. Persistent queue worker (every 10s): Dispatches pending jobs & auto-recovers stale jobs.
+   * 2. Active watchdog (every 30s): Detects silent network drops and reconnects automatically.
+   */
+  public static startBackgroundWorkers() {
+    if (this.queueWorkerTimer || this.watchdogTimer) return;
+
+    this.queueWorkerTimer = setInterval(async () => {
+      try {
+        // Recover stale jobs locked in PROCESSING for > 3 minutes (e.g. server restart)
+        const staleThreshold = new Date(Date.now() - 3 * 60 * 1000);
+        await prisma.messageJob.updateMany({
+          where: {
+            status: JobStatus.PROCESSING,
+            lockedAt: { lte: staleThreshold },
+          },
+          data: {
+            status: JobStatus.PENDING,
+            lockedAt: null,
+          },
+        }).catch(() => {});
+
+        // Automatically dispatch queued messages if connected
+        if (this.sock && this.status === WhatsAppIntegrationStatus.CONNECTED) {
+          await this.processPendingJobs();
+        }
+      } catch (err: any) {
+        // Silently catch background queue runner errors
+      }
+    }, 10000);
+
+    this.watchdogTimer = setInterval(async () => {
+      try {
+        if (this.isExplicitlyStopped) return;
+
+        // If status says CONNECTED, ensure the underlying WebSocket is truly OPEN (1)
+        if (this.status === WhatsAppIntegrationStatus.CONNECTED) {
+          const wsReadyState = (this.sock?.ws as any)?.readyState;
+          if (wsReadyState !== undefined && wsReadyState > 1) {
+            this.log('Watchdog detected stale/closed WebSocket connection. Reconnecting...', 'warn');
+            this.connect().catch(() => {});
+          }
+        }
+      } catch (err: any) {
+        // Silently catch watchdog interval errors
+      }
+    }, 30000);
+  }
+
+  /**
    * Initializes the single-user Baileys WhatsApp connection.
    */
   public static async init() {
+    this.startBackgroundWorkers();
     if (this.sock) return;
     this.isExplicitlyStopped = false;
     await this.connect();
+  }
+
+  /**
+   * Requests an 8-character pairing code for phone linking without QR code scan.
+   */
+  public static async requestPairingCode(phoneNumber: string): Promise<string> {
+    if (!this.sock) {
+      this.isExplicitlyStopped = false;
+      await this.connect();
+      await delay(1500);
+    }
+
+    if (!this.sock) {
+      throw new Error('WhatsApp socket could not be initialized');
+    }
+
+    const cleanPhone = phoneNumber.replace(/\D/g, '');
+    if (!cleanPhone || cleanPhone.length < 8) {
+      throw new Error('Please provide a valid phone number with country code (e.g., 923001234567)');
+    }
+
+    try {
+      const code = await this.sock.requestPairingCode(cleanPhone);
+      this.log(`Pairing code generated for +${cleanPhone}: ${code}`);
+      return code;
+    } catch (err: any) {
+      this.log(`Failed to request pairing code: ${err.message}`, 'error');
+      throw new Error(err.message || 'Failed to request pairing code from WhatsApp');
+    }
   }
 
   /**
@@ -170,9 +252,16 @@ export class BaileysService {
         },
         logger,
         printQRInTerminal: false,
-        browser: Browsers.macOS('Desktop'),
+        browser: ['ByteForge Automation', 'Chrome', '124.0.0.0'],
         connectTimeoutMs: 60000,
-        keepAliveIntervalMs: 25000,
+        keepAliveIntervalMs: 15000,
+        // STANDALONE MULTI-DEVICE OPTIMIZATIONS:
+        // Do not demand full chat history from the phone; runs 100% independently even if phone is offline or WhatsApp is closed
+        syncFullHistory: false,
+        shouldSyncHistoryMessage: () => false,
+        markOnlineOnConnect: false,
+        defaultQueryTimeoutMs: 60000,
+        generateHighQualityLinkPreview: false,
         emitOwnEvents: false,
         getMessage: async (key: proto.IMessageKey) => {
           return this.getMessage(key);
@@ -209,7 +298,7 @@ export class BaileysService {
           const normalized = jidNormalizedUser(rawJid);
           this.displayPhoneNumber = normalized.split('@')[0];
 
-          this.log(`Connected successfully to WhatsApp as +${this.displayPhoneNumber}!`);
+          this.log(`Connected successfully to WhatsApp as +${this.displayPhoneNumber}! (Standalone Multi-Device Active)`);
           await this.syncDatabaseIntegrationStatus();
           this.broadcastState();
 
@@ -243,8 +332,14 @@ export class BaileysService {
           } else if (shouldReconnect) {
             this.status = WhatsAppIntegrationStatus.RECONNECTING;
             this.reconnectAttempts++;
-            const backoffMs = Math.min(30000, Math.pow(2, this.reconnectAttempts) * 1500);
-            this.log(`Reconnecting in ${(backoffMs / 1000).toFixed(1)}s (attempt ${this.reconnectAttempts})...`);
+
+            // For restartRequired (515) or connectionClosed (428), reconnect swiftly without heavy backoff
+            const isStreamRestart = statusCode === 515 || statusCode === 428;
+            const backoffMs = isStreamRestart
+              ? 800
+              : Math.min(30000, Math.pow(2, this.reconnectAttempts) * 1500);
+
+            this.log(`Reconnecting in ${(backoffMs / 1000).toFixed(1)}s (statusCode: ${statusCode || 'stream'}, attempt ${this.reconnectAttempts})...`);
             this.broadcastState();
 
             this.reconnectTimer = setTimeout(() => {

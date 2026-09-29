@@ -88,6 +88,27 @@ export const resetSession = async (
 };
 
 /**
+ * Request an 8-character pairing code for phone-number based linking.
+ */
+export const requestPairingCode = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const { phoneNumber } = req.body;
+    if (!phoneNumber || typeof phoneNumber !== 'string') {
+      res.status(400).json({ success: false, message: 'Valid phone number with country code is required (e.g. 923001234567)' });
+      return;
+    }
+    const code = await BaileysService.requestPairingCode(phoneNumber);
+    res.status(200).json({ success: true, pairingCode: code });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * Resend confirmation message for an order.
  */
 export const resendConfirmation = async (

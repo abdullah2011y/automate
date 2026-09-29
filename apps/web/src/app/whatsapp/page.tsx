@@ -100,6 +100,13 @@ function WhatsAppContent() {
   const [copiedPhone, setCopiedPhone] = useState(false);
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  // Pairing Code Mode State
+  const [pairingMode, setPairingMode] = useState<'qr' | 'code'>('qr');
+  const [pairingPhone, setPairingPhone] = useState('');
+  const [pairingCodeResult, setPairingCodeResult] = useState<string | null>(null);
+  const [loadingPairingCode, setLoadingPairingCode] = useState(false);
+  const [copiedPairingCode, setCopiedPairingCode] = useState(false);
+
   // Templates State
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
   const [loadingTemplates, setLoadingTemplates] = useState(false);
@@ -295,6 +302,30 @@ function WhatsAppContent() {
       setActionMessage({ type: 'error', text: err.message || 'Failed to reset session' });
     } finally {
       setIsActionLoading(false);
+    }
+  };
+
+  const handleRequestPairingCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pairingPhone.trim()) return;
+    setLoadingPairingCode(true);
+    setActionMessage(null);
+    try {
+      const res = await api.requestPairingCode(pairingPhone.trim());
+      if (res.success && res.pairingCode) {
+        setPairingCodeResult(res.pairingCode);
+        setActionMessage({
+          type: 'success',
+          text: `Pairing Code: ${res.pairingCode}. WhatsApp Linked Devices mein enter karein!`,
+        });
+      }
+    } catch (err: any) {
+      setActionMessage({
+        type: 'error',
+        text: err?.message || 'Failed to generate pairing code. Please retry with country code.',
+      });
+    } finally {
+      setLoadingPairingCode(false);
     }
   };
 
@@ -669,10 +700,21 @@ Order confirm ya cancel karne ke liye neeche diye gaye button par click karein.`
                   <CheckCircle2 className="w-10 h-10" />
                 </div>
                 <h3 className="text-xl font-bold text-white mb-2">WhatsApp Web Active</h3>
-                <p className="text-sm text-slate-400 mb-6">
+                <p className="text-sm text-slate-400 mb-4">
                   Connected to WhatsApp as{' '}
                   <span className="font-semibold text-emerald-300">+{statusData.displayPhoneNumber}</span>. Automated confirmations are running smoothly.
                 </p>
+
+                {/* Standalone Multi-Device Reassurance Banner */}
+                <div className="w-full bg-emerald-950/40 border border-emerald-500/30 rounded-xl p-3.5 mb-5 text-left flex items-start gap-2.5">
+                  <ShieldCheck className="w-5 h-5 text-emerald-400 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <h5 className="text-xs font-bold text-emerald-300">⚡ Standalone Multi-Device Mode Active</h5>
+                    <p className="text-[11px] text-emerald-200/90 leading-relaxed mt-0.5">
+                      Aapka mobile phone band ho, offline ho, ya Wi-Fi disconnected ho — bot WhatsApp servers se 24/7 direct connected rehta hai aur automatic order confirmation bhejta rahega.
+                    </p>
+                  </div>
+                </div>
 
                 <div className="w-full bg-slate-950/60 border border-slate-800 rounded-xl p-4 text-left space-y-2 mb-6">
                   <div className="flex justify-between text-xs">
@@ -718,73 +760,173 @@ Order confirm ya cancel karne ke liye neeche diye gaye button par click karein.`
                   </button>
                 </div>
               </div>
-            ) : statusData?.qrCode ? (
-              <div className="py-6 flex flex-col items-center max-w-sm">
-                <div className="bg-white p-4 rounded-2xl shadow-2xl mb-4 border-4 border-slate-800">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={statusData.qrCode}
-                    alt="WhatsApp Web Pairing QR Code"
-                    className="w-64 h-64 sm:w-72 sm:h-72 object-contain"
-                  />
-                </div>
-                <div className="flex items-center gap-2 text-xs text-amber-400 font-medium mb-3">
-                  <Clock className="w-3.5 h-3.5 animate-spin" />
-                  QR refreshes automatically via Baileys Multi-Device protocol
-                </div>
-
-                <div className="p-3 bg-slate-950/80 border border-amber-500/30 rounded-xl text-left text-xs text-amber-200/90 mb-4 space-y-1">
-                  <p className="font-bold flex items-center gap-1.5 text-amber-400">
-                    <AlertTriangle className="w-3.5 h-3.5" /> Agr phone par &quot;Couldn&apos;t link device&quot; aaye:
-                  </p>
-                  <p className="text-[11px] text-slate-400">
-                    Neeche <strong>&quot;Reset &amp; Clean Session&quot;</strong> button click karein. Yeh puranay cached keys ko database se delete karke bilkul fresh pairing QR bana dega.
-                  </p>
-                </div>
-
-                <div className="flex gap-2.5 w-full">
-                  <button
-                    onClick={handleReconnect}
-                    disabled={isActionLoading}
-                    className="flex-1 py-2 px-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-semibold transition flex items-center justify-center gap-1.5"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                    New QR
-                  </button>
-                  <button
-                    onClick={handleResetSession}
-                    disabled={isActionLoading}
-                    className="flex-1 py-2 px-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold transition flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-900/30"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5" />
-                    Reset &amp; Clean Session
-                  </button>
-                </div>
-              </div>
             ) : (
-              <div className="py-16 flex flex-col items-center justify-center">
-                <div className="w-16 h-16 rounded-full bg-slate-800 flex items-center justify-center text-slate-400 mb-4 animate-pulse">
-                  <RefreshCw className="w-8 h-8 animate-spin" />
-                </div>
-                <h4 className="text-base font-semibold text-white mb-1">Generating Secure QR Code...</h4>
-                <p className="text-xs text-slate-400 max-w-xs mb-4">
-                  Initializing WhatsApp socket and loading Signal cryptographic keys from PostgreSQL.
-                </p>
-                <div className="flex gap-2">
+              <div className="py-6 flex flex-col items-center max-w-sm w-full">
+                {/* Pairing Mode Toggle */}
+                <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-800 mb-4 w-full max-w-xs">
                   <button
-                    onClick={handleReconnect}
-                    className="text-xs text-emerald-400 hover:underline font-medium"
+                    type="button"
+                    onClick={() => setPairingMode('qr')}
+                    className={cn(
+                      'flex-1 py-1.5 px-3 rounded-lg text-xs font-medium transition flex items-center justify-center gap-1.5',
+                      pairingMode === 'qr'
+                        ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-semibold'
+                        : 'text-slate-400 hover:text-slate-200'
+                    )}
                   >
-                    Click to reinitialize
+                    <QrCode className="w-3.5 h-3.5" />
+                    Scan QR
                   </button>
-                  <span className="text-slate-600">|</span>
                   <button
-                    onClick={handleResetSession}
-                    className="text-xs text-amber-400 hover:underline font-medium"
+                    type="button"
+                    onClick={() => setPairingMode('code')}
+                    className={cn(
+                      'flex-1 py-1.5 px-3 rounded-lg text-xs font-medium transition flex items-center justify-center gap-1.5',
+                      pairingMode === 'code'
+                        ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-semibold'
+                        : 'text-slate-400 hover:text-slate-200'
+                    )}
                   >
-                    Reset Session
+                    <Smartphone className="w-3.5 h-3.5" />
+                    Phone Code
                   </button>
                 </div>
+
+                {pairingMode === 'code' ? (
+                  /* Phone Pairing Code Option */
+                  <div className="w-full bg-slate-950/60 border border-slate-800 rounded-2xl p-5 mb-4 text-left">
+                    <h4 className="text-sm font-bold text-white mb-1 flex items-center gap-2">
+                      <Smartphone className="w-4 h-4 text-emerald-400" />
+                      Link via 8-Digit Pairing Code
+                    </h4>
+                    <p className="text-xs text-slate-400 mb-4">
+                      Camera scan ki zaroorat nahi. Apna WhatsApp number enter karein aur code generate karein.
+                    </p>
+
+                    <form onSubmit={handleRequestPairingCode} className="space-y-3">
+                      <div>
+                        <label className="text-xs font-semibold text-slate-300 block mb-1">
+                          WhatsApp Mobile Number
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. 923001234567"
+                          value={pairingPhone}
+                          onChange={(e) => setPairingPhone(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 font-mono"
+                        />
+                      </div>
+
+                      <button
+                        type="submit"
+                        disabled={loadingPairingCode || !pairingPhone.trim()}
+                        className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-900/30"
+                      >
+                        {loadingPairingCode ? (
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <Smartphone className="w-4 h-4" />
+                        )}
+                        Generate Pairing Code
+                      </button>
+                    </form>
+
+                    {pairingCodeResult && (
+                      <div className="mt-4 p-4 bg-emerald-950/50 border border-emerald-500/40 rounded-xl text-center">
+                        <div className="text-[11px] uppercase tracking-wider text-emerald-400 font-semibold mb-1">
+                          Aapka WhatsApp Pairing Code:
+                        </div>
+                        <div className="font-mono text-2xl font-bold tracking-widest text-white py-1 flex items-center justify-center gap-3">
+                          <span>{pairingCodeResult}</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(pairingCodeResult);
+                              setCopiedPairingCode(true);
+                              setTimeout(() => setCopiedPairingCode(false), 2000);
+                            }}
+                            className="p-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 transition"
+                            title="Copy code"
+                          >
+                            {copiedPairingCode ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                          </button>
+                        </div>
+                        <p className="text-[11px] text-slate-300 mt-2 leading-relaxed text-left">
+                          Phone par WhatsApp kholain → <strong>Linked Devices</strong> → <strong>Link with phone number instead</strong> par tap karein aur yeh code enter karein.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                ) : statusData?.qrCode ? (
+                  /* QR Code View */
+                  <>
+                    <div className="bg-white p-4 rounded-2xl shadow-2xl mb-4 border-4 border-slate-800">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={statusData.qrCode}
+                        alt="WhatsApp Web Pairing QR Code"
+                        className="w-64 h-64 sm:w-72 sm:h-72 object-contain"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-amber-400 font-medium mb-3">
+                      <Clock className="w-3.5 h-3.5 animate-spin" />
+                      QR refreshes automatically via Baileys Multi-Device protocol
+                    </div>
+
+                    <div className="p-3 bg-slate-950/80 border border-amber-500/30 rounded-xl text-left text-xs text-amber-200/90 mb-4 space-y-1 w-full">
+                      <p className="font-bold flex items-center gap-1.5 text-amber-400">
+                        <AlertTriangle className="w-3.5 h-3.5" /> Agr phone par &quot;Couldn&apos;t link device&quot; aaye:
+                      </p>
+                      <p className="text-[11px] text-slate-400">
+                        Neeche <strong>&quot;Reset &amp; Clean Session&quot;</strong> button click karein. Yeh puranay cached keys ko database se delete karke bilkul fresh pairing QR bana dega.
+                      </p>
+                    </div>
+
+                    <div className="flex gap-2.5 w-full">
+                      <button
+                        onClick={handleReconnect}
+                        disabled={isActionLoading}
+                        className="flex-1 py-2 px-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-semibold transition flex items-center justify-center gap-1.5"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                        New QR
+                      </button>
+                      <button
+                        onClick={handleResetSession}
+                        disabled={isActionLoading}
+                        className="flex-1 py-2 px-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold transition flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-900/30"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        Reset &amp; Clean Session
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <div className="py-16 flex flex-col items-center justify-center">
+                    <div className="w-16 h-16 rounded-full bg-slate-800 flex items-center justify-center text-slate-400 mb-4 animate-pulse">
+                      <RefreshCw className="w-8 h-8 animate-spin" />
+                    </div>
+                    <h4 className="text-base font-semibold text-white mb-1">Generating Secure Connection...</h4>
+                    <p className="text-xs text-slate-400 max-w-xs mb-4">
+                      Initializing WhatsApp socket and loading Signal cryptographic keys from PostgreSQL.
+                    </p>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={handleReconnect}
+                        className="text-xs text-emerald-400 hover:underline font-medium"
+                      >
+                        Click to reinitialize
+                      </button>
+                      <span className="text-slate-600">|</span>
+                      <button
+                        onClick={handleResetSession}
+                        className="text-xs text-amber-400 hover:underline font-medium"
+                      >
+                        Reset Session
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -824,14 +966,16 @@ Order confirm ya cancel karne ke liye neeche diye gaye button par click karein.`
                   <span className="w-6 h-6 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 flex items-center justify-center font-bold text-xs flex-shrink-0 mt-0.5">
                     4
                   </span>
-                  <span>Point your phone camera at the QR code on the left to pair.</span>
+                  <span>
+                    Camera se <strong>QR code scan karein</strong> ya <strong>&quot;Link with phone number instead&quot;</strong> chun kar 8-digit code enter karein.
+                  </span>
                 </li>
               </ol>
 
-              <div className="mt-5 p-3.5 bg-indigo-950/30 border border-indigo-900/50 rounded-xl flex items-start gap-2.5">
-                <ShieldCheck className="w-5 h-5 text-indigo-400 flex-shrink-0 mt-0.5" />
-                <p className="text-xs text-indigo-200/80 leading-relaxed">
-                  <strong>Persistent Encrypted Session:</strong> Your WhatsApp credentials and encryption keys are stored securely inside PostgreSQL using AES-256-GCM. Session persists automatically across Northflank container restarts.
+              <div className="mt-5 p-3.5 bg-emerald-950/30 border border-emerald-800/50 rounded-xl flex items-start gap-2.5">
+                <ShieldCheck className="w-5 h-5 text-emerald-400 flex-shrink-0 mt-0.5" />
+                <p className="text-xs text-emerald-200/90 leading-relaxed">
+                  <strong>100% Standalone Multi-Device Operation:</strong> Ek dafa link hone ke baad aapka mobile phone band ho, offline ho, ya Wi-Fi disconnected ho — yeh bot WhatsApp cloud servers se direct connect rehta hai aur 24/7 order confirmations send aur receive karta rahega. (Sirf har 14 din mein ek dafa phone par WhatsApp on hona zaroori hai as per WhatsApp security policy).
                 </p>
               </div>
             </div>

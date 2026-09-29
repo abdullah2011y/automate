@@ -1,0 +1,78 @@
+name: Build iOS IPA (ByteForge)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - 'apps/web/**'
+      - 'scripts/**'
+      - '.github/workflows/build-ios-ipa.yml'
+
+jobs:
+  build-ios:
+    name: Build & Export iOS IPA
+    runs-on: macos-14
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Build Next.js Static Export
+        run: npm --prefix apps/web run build:cap
+        env:
+          NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL || 'https://site--byteforge-backend--qb4y2b9qnwsy.code.run' }}
+          CAPACITOR_BUILD: 'true'
+
+      - name: Sync Capacitor iOS
+        run: npx --prefix apps/web cap sync ios
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Build and Package IPA
+        run: |
+          cd apps/web/ios/App
+          # Clean build folder
+          xcodebuild clean -workspace App.xcworkspace -scheme App -configuration Release
+          
+          # Archive build without code signing requirement
+          xcodebuild archive \
+            -workspace App.xcworkspace \
+            -scheme App \
+            -configuration Release \
+            -archivePath build/ByteForge.xcarchive \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
+
+          # Create Payload directory and copy App
+          mkdir -p build/Payload
+          cp -r build/ByteForge.xcarchive/Products/Applications/App.app build/Payload/ByteForge.app
+
+          # Zip Payload into IPA
+          cd build
+          zip -r ByteForge.ipa Payload
+          cd ../../../..
+          
+          # Move output to root
+          mv apps/web/ios/App/build/ByteForge.ipa ./ByteForge.ipa
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ByteForge-iOS-IPA
+          path: ByteForge.ipa
+          retention-days: 14

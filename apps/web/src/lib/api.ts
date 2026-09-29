@@ -371,6 +371,13 @@ export const api = {
     };
   },
 
+  requestPairingCode: async (phoneNumber: string): Promise<{ success: boolean; pairingCode: string }> => {
+    return request<{ success: boolean; pairingCode: string }>('/whatsapp/pairing-code', {
+      method: 'POST',
+      body: JSON.stringify({ phoneNumber }),
+    });
+  },
+
   resendWhatsAppConfirmation: (orderId: string): Promise<any> => {
     return request(`/whatsapp/resend/${orderId}`, {
       method: 'POST',

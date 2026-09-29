@@ -15,6 +15,7 @@
     "build:api": "npm --prefix apps/api run build",
     "build:web": "npm --prefix apps/web run build",
     "build:mobile": "npm --prefix apps/web run build:cap && npm --prefix apps/web run cap:sync",
+    "build:ipa": "node scripts/build-ipa.js",
     "cap:sync": "npm --prefix apps/web run cap:sync",
     "test:api": "npm --prefix apps/api run test:e2e",
     "test:shopify": "npm --prefix apps/api run test:shopify",

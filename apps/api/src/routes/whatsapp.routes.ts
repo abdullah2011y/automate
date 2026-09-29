@@ -5,6 +5,7 @@ import {
   reconnect,
   disconnect,
   resetSession,
+  requestPairingCode,
   resendConfirmation,
   listTemplates,
   createTemplate,
@@ -35,6 +36,7 @@ router.get('/status', getStatus);
 router.post('/reconnect', qrRateLimiter, reconnect);
 router.post('/disconnect', qrRateLimiter, disconnect);
 router.post('/reset', qrRateLimiter, resetSession);
+router.post('/pairing-code', qrRateLimiter, requestPairingCode);
 router.post('/resend/:orderId', resendRateLimiter, resendConfirmation);
 
 // 2. WhatsApp Message Template Engine

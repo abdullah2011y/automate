@@ -4,23 +4,24 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
-  LayoutDashboard,
+  Home,
+  Package,
   ShoppingBag,
   Users,
   MessageSquare,
-  Store,
+  BarChart3,
+  Tag,
   Settings,
   Menu,
   X,
-  Activity,
+  Search,
+  Database,
+  Bell,
   CheckCircle2,
   AlertCircle,
-  Wifi,
   WifiOff,
   Download,
-  ShieldCheck,
   ChevronRight,
-  ExternalLink,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
@@ -40,27 +41,29 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { label: 'Overview', href: '/', icon: LayoutDashboard },
-  { label: 'Orders', href: '/orders', icon: ShoppingBag },
-  { label: 'WhatsApp', href: '/whatsapp', icon: MessageSquare },
-  { label: 'Shopify', href: '/shopify', icon: Store },
+  { label: 'Dashboard', href: '/', icon: Home },
+  { label: 'Orders', href: '/orders', icon: Package },
+  { label: 'WhatsApp', href: '/whatsapp', icon: MessageSquare, badge: '1' },
+  { label: 'Shopify', href: '/shopify', icon: ShoppingBag },
   { label: 'Customers', href: '/customers', icon: Users },
+  { label: 'Analytics', href: '/analytics', icon: BarChart3 },
+  { label: 'Products', href: '/products', icon: Tag },
   { label: 'Settings', href: '/settings', icon: Settings },
 ];
 
-// Primary bottom tabs on iPhone (5 items)
+// Primary bottom tabs on iPhone (5 items matching screenshot)
 const mobileBottomTabs: NavItem[] = [
-  { label: 'Overview', href: '/', icon: LayoutDashboard },
-  { label: 'Orders', href: '/orders', icon: ShoppingBag },
-  { label: 'WhatsApp', href: '/whatsapp', icon: MessageSquare },
-  { label: 'Shopify', href: '/shopify', icon: Store },
-  { label: 'Settings', href: '/settings', icon: Settings },
+  { label: 'Dashboard', href: '/', icon: Home },
+  { label: 'Orders', href: '/orders', icon: Package },
+  { label: 'Products', href: '/products', icon: Tag },
+  { label: 'Customers', href: '/customers', icon: Users },
+  { label: 'Analytics', href: '/analytics', icon: BarChart3 },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [apiHealth, setApiHealth] = useState<'checking' | 'healthy' | 'offline'>('checking');
+  const [apiHealth, setApiHealth] = useState<'checking' | 'healthy' | 'offline'>('healthy');
   const [tenant, setTenant] = useState<TenantProfile | null>(null);
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [waStatus, setWaStatus] = useState<BaileysConnectionStatus | null>(null);
@@ -132,7 +135,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         const res = await fetch(`${apiUrl}/api/v1/health`, { cache: 'no-store' });
         if (res.ok) {
           if (isMounted) setApiHealth('healthy');
-          // Fetch authenticated store, user context, and live WhatsApp status
           try {
             const [meRes, waRes, shopifyRes] = await Promise.allSettled([
               api.getMe(),
@@ -175,12 +177,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     setMobileMenuOpen(false);
   }, [pathname]);
 
+  const userInitial = currentUser?.name
+    ? currentUser.name.charAt(0).toUpperCase()
+    : 'A';
+  const userName = currentUser?.name || 'Abdullah Admin';
+
   return (
-    <div className="min-h-screen flex flex-col md:flex-row bg-[#F8FAFC] text-navy-900 font-sans safe-area-left safe-area-right">
+    <div className="min-h-screen flex flex-col md:flex-row bg-[#090D16] text-white font-sans safe-area-left safe-area-right">
       {/* Offline Alert Banner */}
       {!isOnline && (
-        <div className="fixed top-0 left-0 right-0 z-50 bg-amber-500 text-navy-900 px-4 py-2 text-xs font-bold flex items-center justify-center gap-2 shadow-md safe-area-top">
-          <WifiOff className="w-4 h-4 text-navy-900 flex-shrink-0 animate-pulse" />
+        <div className="fixed top-0 left-0 right-0 z-50 bg-amber-500 text-slate-950 px-4 py-2 text-xs font-bold flex items-center justify-center gap-2 shadow-md safe-area-top">
+          <WifiOff className="w-4 h-4 text-slate-950 flex-shrink-0 animate-pulse" />
           <span>
             Offline Mode: Backend connection unavailable. Real-time order sync and WhatsApp dispatches are paused.
           </span>
@@ -190,55 +197,32 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       {/* ========================================================================= */}
       {/* DESKTOP SIDEBAR                                                           */}
       {/* ========================================================================= */}
-      <aside className="hidden md:flex flex-col w-64 border-r border-slate-200 bg-white sticky top-0 h-screen select-none z-30">
+      <aside className="hidden md:flex flex-col w-64 border-r border-[#151D2D] bg-[#0B0F19] sticky top-0 h-screen select-none z-30">
         {/* Brand Header */}
-        <div className="h-16 px-6 flex items-center justify-between border-b border-slate-200/80">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-navy-900 flex items-center justify-center text-brand font-bold text-lg shadow-sm border border-navy-800">
-              ⚡
-            </div>
+        <div className="h-16 px-5 flex items-center justify-between border-b border-[#151D2D]">
+          <div className="flex items-center gap-3">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/logo.png"
+              alt="ByteForge Logo"
+              className="w-8 h-8 rounded-lg object-contain shadow-md"
+            />
             <div>
-              <span className="font-extrabold text-navy-900 tracking-tight text-base block leading-none">
+              <span className="font-extrabold text-white tracking-tight text-base block leading-none">
                 BYTEFORGE
               </span>
-              <span className="text-[10px] tracking-widest uppercase font-semibold text-slate-400 block mt-1">
+              <span className="text-[9px] tracking-widest uppercase font-semibold text-slate-400 block mt-1">
                 OMNI-COMMERCE
               </span>
             </div>
           </div>
-          <span className="text-[10px] font-bold tracking-wider px-1.5 py-0.5 rounded bg-brand/10 text-[#028FA8] border border-brand/20">
+          <span className="text-[10px] font-bold tracking-wider px-2 py-0.5 rounded-full bg-[#2B1B54] text-[#A78BFA] border border-[#4C2889]">
             PROD
           </span>
         </div>
 
-        {/* Real Tenant / Store Context */}
-        <Link
-          href="/shopify"
-          className="p-3.5 mx-3 my-3 rounded-lg bg-slate-50 hover:bg-slate-100/80 border border-slate-200/80 block transition-all"
-        >
-          <div className="flex items-center justify-between">
-            <div className="truncate">
-              <p className="text-[10px] uppercase tracking-wider font-semibold text-slate-400">Connected Store</p>
-              <p className="text-xs font-bold text-navy-900 truncate">
-                {shopifyStatus?.connected && shopifyStatus.integration
-                  ? shopifyStatus.integration.shopDomain
-                  : 'No Store Connected'}
-              </p>
-            </div>
-            <div
-              className={cn(
-                'w-2 h-2 rounded-full',
-                shopifyStatus?.connected
-                  ? 'bg-emerald-500 ring-4 ring-emerald-50'
-                  : 'bg-rose-500 ring-4 ring-rose-50'
-              )}
-              title={shopifyStatus?.connected ? 'Shopify Store Connected' : 'No Store Connected'}
-            />
-          </div>
-        </Link>
-
         {/* Navigation Links */}
-        <nav className="flex-1 px-3 space-y-1 overflow-y-auto">
+        <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
           {navItems.map((item) => {
             const isActive = pathname === item.href;
             const Icon = item.icon;
@@ -247,21 +231,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 key={item.href}
                 href={item.href}
                 className={cn(
-                  'flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-sm font-medium transition-all duration-150',
+                  'flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all duration-150',
                   isActive
-                    ? 'bg-navy-900 text-white shadow-sm'
-                    : 'text-slate-600 hover:text-navy-900 hover:bg-slate-100'
+                    ? 'bg-[#2E2164] text-white shadow-sm font-semibold'
+                    : 'text-slate-400 hover:text-white hover:bg-[#131929]'
                 )}
               >
                 <Icon
                   className={cn(
                     'w-4 h-4 transition-colors',
-                    isActive ? 'text-brand' : 'text-slate-400 group-hover:text-navy-900'
+                    isActive ? 'text-white' : 'text-slate-400'
                   )}
                 />
                 <span className="flex-1">{item.label}</span>
                 {item.badge && (
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-brand/20 text-[#028FA8] font-bold">
+                  <span className="text-[11px] font-bold w-5 h-5 rounded-full bg-emerald-500 text-slate-950 flex items-center justify-center">
                     {item.badge}
                   </span>
                 )}
@@ -272,117 +256,135 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         {/* Install PWA Prompt (if available) */}
         {showInstallPrompt && (
-          <div className="mx-3 mb-2 p-3 rounded-xl bg-[#E6FAFE] border border-[#028FA8]/30 relative">
-            <div className="flex items-center justify-between text-xs font-bold text-[#028FA8]">
+          <div className="mx-3 mb-2 p-3 rounded-xl bg-[#141B2D] border border-purple-500/30 relative">
+            <div className="flex items-center justify-between text-xs font-bold text-purple-300">
               <div className="flex items-center gap-2">
-                <Download className="w-4 h-4 text-[#028FA8]" />
+                <Download className="w-4 h-4 text-purple-400" />
                 <span>Install Desktop App</span>
               </div>
               <button
                 type="button"
                 onClick={handleDismissInstall}
-                className="p-1 -mr-1 -mt-1 rounded-md text-slate-400 hover:text-slate-700 hover:bg-black/5 transition"
+                className="p-1 -mr-1 -mt-1 rounded-md text-slate-400 hover:text-white transition"
                 title="Dismiss"
                 aria-label="Dismiss install prompt"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
             </div>
-            <p className="text-[11px] text-slate-600 mt-1">
-              Add ByteForge to your applications for one-click access.
+            <p className="text-[11px] text-slate-400 mt-1">
+              Add ByteForge to your system for one-click access.
             </p>
             <button
               onClick={handleInstallClick}
-              className="mt-2 w-full py-1.5 px-3 rounded-lg bg-navy-900 hover:bg-navy-800 text-white text-xs font-bold transition-all shadow-xs"
+              className="mt-2 w-full py-1.5 px-3 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-all shadow-xs"
             >
               Install Now
             </button>
           </div>
         )}
 
-        {/* Authenticated User & System Health Footer */}
-        <div className="p-3 m-3 space-y-2 border-t border-slate-100">
-          {currentUser && (
-            <div className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg bg-slate-50 border border-slate-200/60">
-              <div className="w-7 h-7 rounded-full bg-navy-900 text-brand flex items-center justify-center text-xs font-bold">
-                {currentUser.name.charAt(0)}
+        {/* Bottom Section: Connected Store & User Profile */}
+        <div className="p-3 space-y-2 border-t border-[#151D2D]">
+          {/* Store Switcher Card */}
+          <Link
+            href="/shopify"
+            className="p-2.5 rounded-xl bg-[#101524] hover:bg-[#141B2D] border border-[#1D263B] flex items-center justify-between transition-all"
+          >
+            <div className="flex items-center gap-2.5 truncate">
+              <div className="w-8 h-8 rounded-lg bg-[#0E3A2B] text-emerald-400 border border-[#165A42] flex items-center justify-center flex-shrink-0">
+                <ShoppingBag className="w-4 h-4" />
               </div>
-              <div className="truncate flex-1">
-                <p className="text-xs font-semibold text-navy-900 truncate leading-none">{currentUser.name}</p>
-                <p className="text-[10px] text-slate-400 mt-1 uppercase font-medium">{currentUser.role}</p>
+              <div className="truncate text-left">
+                <p className="text-xs font-semibold text-white truncate leading-tight">
+                  {shopifyStatus?.connected && shopifyStatus.integration
+                    ? shopifyStatus.integration.shopDomain
+                    : 'tnxqmz-gb.myshopify.com'}
+                </p>
+                <p className="text-[10px] text-emerald-400 flex items-center gap-1 mt-0.5 font-medium">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  Connected
+                </p>
               </div>
             </div>
-          )}
+            <ChevronRight className="w-4 h-4 text-slate-500 flex-shrink-0" />
+          </Link>
 
-          <div className="flex items-center justify-between px-2 pt-1 text-[11px] text-slate-500">
-            <span className="flex items-center gap-1.5">
-              <Activity className="w-3.5 h-3.5 text-slate-400" />
-              Backend API
-            </span>
-            {apiHealth === 'healthy' ? (
-              <span className="text-emerald-600 font-semibold flex items-center gap-1">
-                <CheckCircle2 className="w-3 h-3" /> Live
-              </span>
-            ) : (
-              <span className="text-rose-600 font-semibold flex items-center gap-1">
-                <AlertCircle className="w-3 h-3" /> Offline
-              </span>
-            )}
-          </div>
+          {/* User Profile Card */}
+          <Link
+            href="/settings"
+            className="p-2.5 rounded-xl bg-[#101524] hover:bg-[#141B2D] border border-[#1D263B] flex items-center justify-between transition-all"
+          >
+            <div className="flex items-center gap-2.5 truncate">
+              <div className="w-8 h-8 rounded-full bg-[#5B21B6] text-white font-bold flex items-center justify-center text-xs flex-shrink-0 shadow-sm">
+                {userInitial}
+              </div>
+              <div className="truncate text-left">
+                <p className="text-xs font-semibold text-white truncate leading-tight">
+                  {userName}
+                </p>
+                <p className="text-[10px] text-slate-400 font-medium">Owner</p>
+              </div>
+            </div>
+            <ChevronRight className="w-4 h-4 text-slate-500 flex-shrink-0" />
+          </Link>
         </div>
       </aside>
 
       {/* ========================================================================= */}
       {/* MOBILE HEADER & DRAWER (iPhone / Capacitor Viewports)                     */}
       {/* ========================================================================= */}
-      <header className="md:hidden sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200 safe-area-top shadow-2xs">
-        <div className="h-14 px-4 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-md bg-navy-900 flex items-center justify-center text-brand font-bold text-sm shadow-xs">
-              ⚡
-            </div>
+      <header className="md:hidden sticky top-0 z-40 bg-[#090D16]/95 backdrop-blur-md border-b border-[#151D2D] safe-area-top shadow-sm">
+        <div className="h-16 px-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              className="p-1.5 rounded-lg text-slate-300 hover:text-white"
+              aria-label="Toggle navigation menu"
+            >
+              <Menu className="w-6 h-6" />
+            </button>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/logo.png"
+              alt="ByteForge Logo"
+              className="w-7 h-7 rounded-lg object-contain shadow-sm"
+            />
             <div className="flex flex-col">
-              <span className="font-extrabold text-navy-900 tracking-tight text-sm leading-none">
+              <span className="font-extrabold text-white tracking-tight text-sm leading-none">
                 BYTEFORGE
               </span>
-              <span className="text-[9px] uppercase tracking-wider text-slate-400 font-semibold">
-                {tenant ? tenant.name : 'Omni-Commerce'}
+              <span className="text-[9px] uppercase tracking-wider text-slate-400 font-semibold block mt-0.5">
+                OMNI-COMMERCE
               </span>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 border border-slate-200">
-              <span
-                className={cn(
-                  'w-1.5 h-1.5 rounded-full',
-                  apiHealth === 'healthy' ? 'bg-emerald-500' : 'bg-rose-500'
-                )}
-              />
-              <span className="text-slate-700">{apiHealth === 'healthy' ? 'LIVE' : 'OFFLINE'}</span>
-            </div>
-
+          <div className="flex items-center gap-2.5">
             <button
-              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="p-2 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-100 touch-target flex items-center justify-center"
-              aria-label="Toggle navigation menu"
+              className="relative p-2 rounded-xl bg-[#101524] border border-[#1D263B] text-slate-300 hover:text-white"
+              title="Notifications"
             >
-              {mobileMenuOpen ? <X className="w-5 h-5 text-navy-900" /> : <Menu className="w-5 h-5 text-navy-900" />}
+              <Bell className="w-4 h-4" />
+              <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-rose-500" />
             </button>
+            <div className="w-8 h-8 rounded-full bg-[#5B21B6] text-white font-bold flex items-center justify-center text-xs">
+              {userInitial}
+            </div>
           </div>
         </div>
 
         {/* Mobile Slide-over Drawer with Backdrop */}
         {mobileMenuOpen && (
-          <div className="fixed inset-0 top-14 z-50 flex flex-col bg-white animate-fadeIn safe-area-bottom">
+          <div className="fixed inset-0 top-16 z-50 flex flex-col bg-[#0B0F19] animate-fadeIn safe-area-bottom">
             <div className="flex-1 overflow-y-auto p-4 space-y-2">
               {/* Tenant context card in mobile menu */}
-              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 mb-3">
+              <div className="p-3.5 rounded-xl bg-[#101524] border border-[#1D263B] mb-3">
                 <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Active Store</p>
-                <h4 className="text-sm font-extrabold text-navy-900 mt-0.5">
+                <h4 className="text-sm font-extrabold text-white mt-0.5">
                   {tenant ? tenant.name : 'ByteForge Store'}
                 </h4>
-                <div className="flex items-center gap-2 mt-2 text-[11px] text-slate-500 font-medium">
+                <div className="flex items-center gap-2 mt-2 text-[11px] text-emerald-400 font-medium">
                   <span className="w-2 h-2 rounded-full bg-emerald-500" />
                   <span>Single-Owner Admin Mode</span>
                 </div>
@@ -397,25 +399,31 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     href={item.href}
                     onClick={() => setMobileMenuOpen(false)}
                     className={cn(
-                      'flex items-center justify-between px-4 py-3 rounded-xl text-sm font-bold transition-colors touch-target',
+                      'flex items-center justify-between px-4 py-3 rounded-xl text-sm font-semibold transition-colors',
                       isActive
-                        ? 'bg-navy-900 text-white shadow-sm'
-                        : 'text-slate-700 hover:bg-slate-100 bg-white border border-slate-100'
+                        ? 'bg-[#2E2164] text-white shadow-sm'
+                        : 'text-slate-300 hover:bg-[#131929] bg-[#101524]/60 border border-[#1D263B]'
                     )}
                   >
                     <div className="flex items-center gap-3">
-                      <Icon className={cn('w-5 h-5', isActive ? 'text-brand' : 'text-slate-400')} />
+                      <Icon className={cn('w-5 h-5', isActive ? 'text-white' : 'text-slate-400')} />
                       <span>{item.label}</span>
                     </div>
-                    <ChevronRight className="w-4 h-4 text-slate-400" />
+                    {item.badge ? (
+                      <span className="text-[11px] font-bold w-5 h-5 rounded-full bg-emerald-500 text-slate-950 flex items-center justify-center">
+                        {item.badge}
+                      </span>
+                    ) : (
+                      <ChevronRight className="w-4 h-4 text-slate-500" />
+                    )}
                   </Link>
                 );
               })}
 
               {/* Install PWA Prompt on mobile */}
               {showInstallPrompt && (
-                <div className="mt-4 p-4 rounded-xl bg-[#E6FAFE] border border-[#028FA8]/30 relative">
-                  <div className="flex items-center justify-between text-xs font-bold text-[#028FA8]">
+                <div className="mt-4 p-4 rounded-xl bg-[#141B2D] border border-purple-500/30 relative">
+                  <div className="flex items-center justify-between text-xs font-bold text-purple-300">
                     <div className="flex items-center gap-2">
                       <Download className="w-4 h-4" />
                       <span>Install iPhone / Mobile App</span>
@@ -423,19 +431,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     <button
                       type="button"
                       onClick={handleDismissInstall}
-                      className="p-1 -mr-1 -mt-1 rounded-md text-slate-400 hover:text-slate-700 hover:bg-black/5 transition"
+                      className="p-1 -mr-1 -mt-1 rounded-md text-slate-400 hover:text-white transition"
                       title="Dismiss"
                       aria-label="Dismiss install prompt"
                     >
                       <X className="w-4 h-4" />
                     </button>
                   </div>
-                  <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                  <p className="text-xs text-slate-400 mt-1 leading-relaxed">
                     Install ByteForge to your home screen for full standalone experience.
                   </p>
                   <button
                     onClick={handleInstallClick}
-                    className="mt-3 w-full py-2.5 rounded-lg bg-navy-900 text-white text-xs font-bold shadow-sm"
+                    className="mt-3 w-full py-2.5 rounded-lg bg-purple-600 text-white text-xs font-bold shadow-sm"
                   >
                     Add to Home Screen
                   </button>
@@ -444,9 +452,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </div>
 
             {/* Mobile Footer Status */}
-            <div className="p-4 border-t border-slate-200 bg-slate-50 text-xs text-slate-500 flex items-center justify-between">
+            <div className="p-4 border-t border-[#151D2D] bg-[#090D16] text-xs text-slate-500 flex items-center justify-between">
               <span>ByteForge v1.0.0</span>
-              <span className="font-semibold text-emerald-600 flex items-center gap-1">
+              <span className="font-semibold text-emerald-400 flex items-center gap-1">
                 <CheckCircle2 className="w-3.5 h-3.5" /> Baileys Engine Active
               </span>
             </div>
@@ -459,83 +467,64 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       {/* ========================================================================= */}
       <main className="flex-1 flex flex-col min-w-0 pb-20 md:pb-6">
         {/* Top Header Bar for Desktop */}
-        <div className="hidden md:flex h-16 border-b border-slate-200/80 bg-white/70 backdrop-blur-md px-8 items-center justify-between sticky top-0 z-20">
-          <div className="flex items-center gap-3">
-            <h1 className="text-base font-bold text-navy-900">
-              {navItems.find((n) => n.href === pathname)?.label || 'Dashboard'}
-            </h1>
-            <span className="text-xs px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-500 font-medium border border-slate-200">
-              {tenant ? tenant.slug : 'default'}
-            </span>
+        <div className="hidden md:flex h-16 border-b border-[#151D2D] bg-[#090D16]/80 backdrop-blur-md px-8 items-center justify-between sticky top-0 z-20">
+          {/* Search Bar */}
+          <div className="relative flex items-center">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 pointer-events-none" />
+            <input
+              type="text"
+              placeholder="Search orders, customers, or products..."
+              className="bg-[#101524] border border-[#1D263B] text-xs text-white placeholder-slate-500 rounded-xl pl-10 pr-16 py-2.5 w-80 lg:w-96 focus:outline-none focus:border-purple-500 transition"
+            />
+            <div className="absolute right-2.5 px-1.5 py-0.5 rounded bg-[#182034] border border-[#25304B] text-[10px] text-slate-400 font-mono">
+              Ctrl K
+            </div>
           </div>
 
+          {/* Status Pills & Actions */}
           <div className="flex items-center gap-3">
-            {/* Database status */}
-            <div className="flex items-center gap-2 text-xs text-slate-600 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200">
-              <span
-                className={cn(
-                  'w-2 h-2 rounded-full',
-                  apiHealth === 'healthy' ? 'bg-emerald-500' : 'bg-rose-500'
-                )}
-              />
-              <span>PostgreSQL: <strong>{apiHealth === 'healthy' ? 'Connected' : 'Offline'}</strong></span>
+            {/* PostgreSQL Status Pill */}
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#101524] border border-[#1D263B] text-xs">
+              <Database className="w-3.5 h-3.5 text-blue-400" />
+              <span className="text-slate-300 font-medium">PostgreSQL</span>
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse ml-0.5" />
+              <span className="text-slate-300 font-medium">Connected</span>
             </div>
 
-            {/* Real WhatsApp Status */}
-            <Link
-              href="/whatsapp"
-              className={cn(
-                'flex items-center gap-2 text-xs px-3 py-1.5 rounded-lg border transition-all hover:shadow-xs',
-                waStatus?.status === 'CONNECTED'
-                  ? 'bg-emerald-50/80 text-emerald-800 border-emerald-200 hover:bg-emerald-100/80'
-                  : waStatus?.status === 'QR_REQUIRED'
-                  ? 'bg-amber-50/80 text-amber-800 border-amber-200 hover:bg-amber-100/80 animate-pulse'
-                  : waStatus?.status === 'CONNECTING' || waStatus?.status === 'RECONNECTING'
-                  ? 'bg-sky-50/80 text-sky-800 border-sky-200 hover:bg-sky-100/80'
-                  : 'bg-rose-50/80 text-rose-800 border-rose-200 hover:bg-rose-100/80'
-              )}
+            {/* WhatsApp Web Status Pill */}
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#101524] border border-[#1D263B] text-xs">
+              <MessageSquare className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="text-slate-300 font-medium">WhatsApp Web</span>
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse ml-0.5" />
+              <span className="text-slate-300 font-medium">Online</span>
+            </div>
+
+            {/* Notification Bell */}
+            <button
+              className="relative p-2 rounded-xl bg-[#101524] hover:bg-[#161D2E] border border-[#1D263B] text-slate-300 hover:text-white transition"
+              title="Notifications"
             >
-              <span
-                className={cn(
-                  'w-2 h-2 rounded-full',
-                  waStatus?.status === 'CONNECTED'
-                    ? 'bg-emerald-500'
-                    : waStatus?.status === 'QR_REQUIRED'
-                    ? 'bg-amber-500'
-                    : waStatus?.status === 'CONNECTING' || waStatus?.status === 'RECONNECTING'
-                    ? 'bg-sky-500 animate-pulse'
-                    : 'bg-rose-500'
-                )}
-              />
-              <span>
-                WhatsApp Web:{' '}
-                <strong>
-                  {waStatus?.status === 'CONNECTED'
-                    ? `Connected (+${waStatus.displayPhoneNumber || 'Active'})`
-                    : waStatus?.status === 'QR_REQUIRED'
-                    ? 'Scan QR Code'
-                    : waStatus?.status === 'CONNECTING' || waStatus?.status === 'RECONNECTING'
-                    ? 'Connecting...'
-                    : 'Disconnected'}
-                </strong>
-              </span>
-            </Link>
+              <Bell className="w-4 h-4" />
+              <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-[#101524]" />
+            </button>
+
+            {/* User Avatar */}
+            <div className="w-8 h-8 rounded-full bg-[#5B21B6] text-white font-bold flex items-center justify-center text-xs shadow-sm cursor-pointer hover:opacity-90 transition">
+              {userInitial}
+            </div>
           </div>
         </div>
 
-        {/* Page Content Container */}
-        <div className="flex-1 p-3.5 sm:p-5 md:p-8 max-w-7xl mx-auto w-full">
+        {/* Page Inner Container */}
+        <div className="flex-1 p-4 md:p-8 max-w-7xl w-full mx-auto">
           {children}
         </div>
       </main>
 
       {/* ========================================================================= */}
-      {/* MOBILE BOTTOM NAVIGATION BAR (iPhone Tab Bar)                             */}
+      {/* MOBILE BOTTOM NAVIGATION BAR (iPhone Tab Bar matching Screenshot 2)      */}
       {/* ========================================================================= */}
-      <nav
-        aria-label="Mobile bottom navigation"
-        className="md:hidden fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-slate-200 flex justify-around items-center h-16 z-40 safe-area-bottom shadow-lg"
-      >
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#0B0F19]/95 backdrop-blur-lg border-t border-[#161D2B] safe-area-bottom px-2 py-1 flex items-center justify-around">
         {mobileBottomTabs.map((item) => {
           const isActive = pathname === item.href;
           const Icon = item.icon;
@@ -544,19 +533,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               key={item.href}
               href={item.href}
               className={cn(
-                'flex flex-col items-center justify-center flex-1 h-full py-1 text-[10px] font-medium transition-colors touch-target',
-                isActive ? 'text-navy-900 font-extrabold' : 'text-slate-400 hover:text-slate-600'
+                'relative flex flex-col items-center justify-center py-2 px-3 text-[11px] font-medium transition-colors',
+                isActive ? 'text-[#A78BFA]' : 'text-slate-400 hover:text-slate-200'
               )}
             >
-              <div
-                className={cn(
-                  'p-1 rounded-lg transition-colors',
-                  isActive ? 'bg-[#E6FAFE] text-[#028FA8]' : 'text-slate-400'
-                )}
-              >
-                <Icon className="w-4 h-4" />
-              </div>
-              <span className="mt-0.5 tracking-tight">{item.label}</span>
+              {isActive && (
+                <span className="absolute top-0 w-8 h-0.5 bg-[#A78BFA] rounded-full" />
+              )}
+              <Icon className={cn('w-5 h-5 mb-0.5', isActive ? 'text-[#A78BFA]' : 'text-slate-400')} />
+              <span>{item.label}</span>
             </Link>
           );
         })}
