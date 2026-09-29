@@ -6,9 +6,6 @@ on:
     branches:
       - main
       - master
-    paths:
-      - 'apps/web/**'
-      - 'package.json'
 
 jobs:
   build-ipa:
@@ -41,7 +38,9 @@ jobs:
           CAPACITOR_BUILD: 'true'
 
       - name: Sync Capacitor iOS
-        run: npx --prefix apps/web cap sync ios
+        run: |
+          cd apps/web
+          npx cap sync ios
 
       - name: Install CocoaPods
         run: |
