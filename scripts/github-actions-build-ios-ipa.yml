@@ -29,7 +29,9 @@ jobs:
           xcrun --show-sdk-path --sdk iphoneos
 
       - name: Install Workspace Dependencies
-        run: npm ci
+        run: |
+          npm ci
+          cd apps/web && ln -sf ../node_modules node_modules
 
       - name: Build Next.js Static Export
         run: npm --prefix apps/web run build:cap
