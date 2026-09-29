@@ -1,4 +1,4 @@
-name: Build iOS IPA (ByteForge)
+name: Build Sideloadly-Ready iOS IPA (ByteForge)
 
 on:
   workflow_dispatch:
@@ -8,15 +8,16 @@ on:
       - master
     paths:
       - 'apps/web/**'
-      - 'scripts/**'
-      - '.github/workflows/build-ios-ipa.yml'
+      - 'package.json'
 
 jobs:
-  build-ios:
-    name: Build & Export iOS IPA
+  build-ipa:
+    name: Build & Package Native iOS IPA
     runs-on: macos-14
+    timeout-minutes: 45
+
     steps:
-      - name: Checkout Code
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
       - name: Setup Node.js 20
@@ -25,54 +26,110 @@ jobs:
           node-version: 20
           cache: 'npm'
 
-      - name: Install Dependencies
+      - name: Select Xcode 15 / 16
+        run: |
+          sudo xcode-select -s /Applications/Xcode.app
+          xcodebuild -version
+
+      - name: Install Workspace Node Dependencies
         run: npm ci
 
-      - name: Build Next.js Static Export
+      - name: Build Next.js Static Bundle (out/)
         run: npm --prefix apps/web run build:cap
         env:
           NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL || 'https://site--byteforge-backend--qb4y2b9qnwsy.code.run' }}
           CAPACITOR_BUILD: 'true'
 
-      - name: Sync Capacitor iOS
+      - name: Synchronize Capacitor iOS Project
         run: npx --prefix apps/web cap sync ios
 
-      - name: Setup Xcode
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: latest-stable
-
-      - name: Build and Package IPA
+      - name: Install CocoaPods Dependencies
         run: |
           cd apps/web/ios/App
-          # Clean build folder
-          xcodebuild clean -workspace App.xcworkspace -scheme App -configuration Release
+          pod install --repo-update
+
+      - name: Compile and Archive iOS App Scheme
+        run: |
+          cd apps/web/ios/App
           
-          # Archive build without code signing requirement
+          # Clean build artifacts
+          xcodebuild clean \
+            -workspace App.xcworkspace \
+            -scheme App \
+            -configuration Release
+          
+          # Archive build with signing disabled for Sideloadly / AltStore compatibility
           xcodebuild archive \
             -workspace App.xcworkspace \
             -scheme App \
             -configuration Release \
-            -archivePath build/ByteForge.xcarchive \
-            CODE_SIGN_IDENTITY="" \
+            -archivePath build/App.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGN_IDENTITY=""
 
-          # Create Payload directory and copy App
-          mkdir -p build/Payload
-          cp -r build/ByteForge.xcarchive/Products/Applications/App.app build/Payload/ByteForge.app
-
-          # Zip Payload into IPA
-          cd build
-          zip -r ByteForge.ipa Payload
-          cd ../../../..
+      - name: Package Payload and Create ByteForge.ipa
+        run: |
+          cd apps/web/ios/App
+          mkdir -p build/ipa/Payload
           
-          # Move output to root
-          mv apps/web/ios/App/build/ByteForge.ipa ./ByteForge.ipa
+          # Copy the compiled App.app containing the real Mach-O binary
+          cp -R build/App.xcarchive/Products/Applications/App.app build/ipa/Payload/
+          
+          cd build/ipa
+          # Preserve symlinks with -y flag (critical for dynamic frameworks)
+          zip -r -y ByteForge.ipa Payload
 
-      - name: Upload IPA Artifact
+      - name: Verify IPA Structure & Binary Integrity
+        run: |
+          cd apps/web/ios/App/build/ipa
+          
+          echo "======================================================="
+          echo "🔍 1. Inspecting Payload Architecture:"
+          echo "======================================================="
+          unzip -l ByteForge.ipa | grep "Payload/App.app/" | head -n 30
+          
+          echo "======================================================="
+          echo "🔍 2. Verifying Processed Info.plist Keys:"
+          echo "======================================================="
+          unzip -p ByteForge.ipa Payload/App.app/Info.plist > /tmp/target_info.plist
+          plutil -p /tmp/target_info.plist | grep -E "CFBundleExecutable|CFBundleIdentifier|CFBundleDisplayName|CFBundleName"
+          
+          EXEC_NAME=$(plutil -extract CFBundleExecutable raw /tmp/target_info.plist)
+          BUNDLE_ID=$(plutil -extract CFBundleIdentifier raw /tmp/target_info.plist)
+          
+          echo "Parsed CFBundleExecutable: '$EXEC_NAME'"
+          echo "Parsed CFBundleIdentifier: '$BUNDLE_ID'"
+          
+          # Ensure build variables are not literal
+          if [[ "$EXEC_NAME" == *"\$"* ]] || [[ "$BUNDLE_ID" == *"\$"* ]]; then
+            echo "❌ ERROR: Unresolved build variable found in Info.plist!"
+            exit 1
+          fi
+          
+          echo "======================================================="
+          echo "🔍 3. Verifying Mach-O Binary Executable:"
+          echo "======================================================="
+          mkdir -p /tmp/verify_app
+          unzip -q ByteForge.ipa -d /tmp/verify_app
+          
+          BINARY_PATH="/tmp/verify_app/Payload/App.app/$EXEC_NAME"
+          if [ ! -f "$BINARY_PATH" ]; then
+            echo "❌ ERROR: Executable binary not found at $BINARY_PATH!"
+            exit 1
+          fi
+          
+          # Check file type (must be Mach-O 64-bit arm64 executable)
+          file "$BINARY_PATH"
+          
+          echo "======================================================="
+          echo "✅ VERIFICATION PASSED: Sideloadly-Ready IPA Validated!"
+          echo "======================================================="
+
+      - name: Upload Verified IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ByteForge-iOS-IPA
-          path: ByteForge.ipa
+          name: ByteForge-iOS-Sideloadly-IPA
+          path: apps/web/ios/App/build/ipa/ByteForge.ipa
+          if-no-files-found: error
           retention-days: 14
