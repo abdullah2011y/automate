@@ -621,23 +621,35 @@ export class BaileysService {
               },
             });
 
-            // 3. Resolve true chat destination JID (must be phone @s.whatsapp.net, NOT an LID)
+            // 3. Resolve true chat destination JID (must always be real customer phone @s.whatsapp.net)
+            let cleanPhone = dbMsg?.recipientPhone?.replace(/\D/g, '') || '';
+            if (!cleanPhone && !from.includes('@lid')) {
+              cleanPhone = from.split('@')[0].replace(/\D/g, '');
+            }
+
             let chatJid = from;
             if (!isGroup) {
-              if (dbMsg?.recipientPhone) {
-                chatJid = toWhatsAppJid(dbMsg.recipientPhone);
-              } else if (from.includes('@lid')) {
-                chatJid = from;
-              } else {
+              if (cleanPhone) {
+                chatJid = toWhatsAppJid(cleanPhone);
+              } else if (!from.includes('@lid')) {
                 chatJid = toWhatsAppJid(from);
               }
             }
 
+            // Guard: ensure destination is a valid phone JID, never an LID
+            if (chatJid.includes('@lid') && cleanPhone) {
+              chatJid = toWhatsAppJid(cleanPhone);
+            }
+
             this.log(`[Decryption Sync] Recipient +${chatJid.split('@')[0]} requested retry for message ${targetId} (attempt ${retryCount}). Re-encrypting with fresh Signal session...`);
 
-            // 4. Force fresh Signal prekey fetch & session rebuild for the requesting participant
-            const requestingParticipant = participant || from;
-            await (this.sock as any).assertSessions?.([requestingParticipant, chatJid], true).catch(() => {});
+            // 4. Force fresh Signal prekey fetch & session rebuild for the recipient's phone JID
+            // CRITICAL: NEVER pass an @lid to assertSessions! Meta rejects @lid in prekey IQ queries and terminates the WebSocket with statusCode 428.
+            if (!isGroup && chatJid.endsWith('@s.whatsapp.net')) {
+              await (this.sock as any).assertSessions?.([chatJid], true).catch(() => {});
+            } else if (isGroup && participant && participant.endsWith('@s.whatsapp.net')) {
+              await (this.sock as any).assertSessions?.([participant], true).catch(() => {});
+            }
 
             const isPoll = !!(originalMsg.pollCreationMessage || originalMsg.pollCreationMessageV2 || originalMsg.pollCreationMessageV3);
             const additionalNodes: any[] = [];
@@ -648,13 +660,18 @@ export class BaileysService {
               });
             }
 
-            // 5. In 1-on-1 chats, relay targeting the specific participant device or fanout
-            const hasDevice = !!jidDecode(requestingParticipant)?.device;
+            // 5. In 1-on-1 chats, relay with useUserDevicesCache: false
+            // Passing useUserDevicesCache: false tells Baileys to query Meta USync to find all recipient companion devices,
+            // encrypt the message for each active device, and deliver to the true phone chat JID.
+            // Do NOT pass participant if it's an LID (avoids Baileys routing to fake LID@s.whatsapp.net).
+            const isParticipantLid = (participant || from).includes('@lid');
+            const hasDevice = !isParticipantLid && !!jidDecode(participant)?.device;
+
             const msgRelayOpts: any = {
               messageId: targetId,
               additionalNodes,
               useUserDevicesCache: false,
-              ...(hasDevice ? { participant: { jid: requestingParticipant, count: retryCount } } : {}),
+              ...(hasDevice ? { participant: { jid: participant, count: retryCount } } : {}),
             };
 
             await (this.sock as any).relayMessage?.(chatJid, originalMsg, msgRelayOpts);
@@ -1519,16 +1536,24 @@ export class BaileysService {
           const pollOptions: PollOption[] = params.pollOptions || DEFAULT_POLL_OPTIONS;
 
           if (hasPoll && pollOptions.length >= 2) {
-            // SINGLE UNIFIED MESSAGE: The interactive confirmation Poll IS the single message!
-            // Combines order text and confirmation question so customer receives ONLY ONE message bubble.
-            const safePollTitle = TemplateService.formatSinglePollQuestion(bodyText, params.pollQuestion);
+            // 1. Send the full formatted template body first
+            await this.simulateHumanTyping(jid, bodyText.length);
+            const textSent = await this.sock.sendMessage(jid, { text: bodyText });
+            const textWamid = textSent?.key?.id || `baileys_${Date.now()}`;
+            if (textSent?.message) {
+              this.cacheMessage(textWamid, textSent.message);
+            }
 
-            // Humanized typing simulation before sending poll
-            await this.simulateHumanTyping(jid, safePollTitle.length);
+            // 2. Natural human typing pause between messages
+            await delay(1800 + Math.floor(Math.random() * 500));
+
+            // 3. Send the clean interactive confirmation poll
+            const pollTitle = (params.pollQuestion || 'Aapka order confirm karein:').trim();
+            await this.simulateHumanTyping(jid, pollTitle.length);
 
             const pollSent = await this.sock.sendMessage(jid, {
               poll: {
-                name: safePollTitle,
+                name: pollTitle,
                 values: pollOptions.map((opt: any) => String(opt.text).slice(0, 100)),
                 selectableCount: 1,
               },

@@ -284,16 +284,20 @@ export const testSendTemplate = async (
     const isPoll = hasPoll !== false && Array.isArray(pollOptions) && pollOptions.length >= 2;
 
     if (isPoll) {
-      // Unified single message: send ONLY the interactive confirmation poll
+      // 1. Send the full formatted template body message first
+      await BaileysService.sendDirectMessage(recipientPhone, rendered);
+
+      // 2. Humanized delay between messages
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+
+      // 3. Send the clean interactive confirmation poll
       const renderedPollQuestion = pollQuestion
         ? TemplateService.render(pollQuestion, sampleVars).trim()
-        : '';
-
-      const safeQuestion = TemplateService.formatSinglePollQuestion(rendered, renderedPollQuestion);
+        : 'Aapka order confirm karein:';
 
       await BaileysService.sendDirectPoll(
         recipientPhone,
-        safeQuestion,
+        renderedPollQuestion,
         pollOptions.map((o: any) => o.text)
       );
     } else {
