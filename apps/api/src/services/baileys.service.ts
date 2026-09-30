@@ -41,6 +41,33 @@ export interface BaileysConnectionStatus {
   logs: Array<{ time: string; message: string; level: 'info' | 'warn' | 'error' }>;
 }
 
+class SimpleMemoryCache {
+  private map = new Map<string, { value: any; expiresAt?: number }>();
+  constructor(private defaultTtlMs: number = 3600000) {}
+
+  get<T>(key: string): T | undefined {
+    const item = this.map.get(key);
+    if (!item) return undefined;
+    if (item.expiresAt && Date.now() > item.expiresAt) {
+      this.map.delete(key);
+      return undefined;
+    }
+    return item.value as T;
+  }
+
+  set<T>(key: string, value: T): void {
+    this.map.set(key, { value, expiresAt: Date.now() + this.defaultTtlMs });
+  }
+
+  del(key: string): void {
+    this.map.delete(key);
+  }
+
+  flushAll(): void {
+    this.map.clear();
+  }
+}
+
 export class BaileysService {
   private static sock: WASocket | null = null;
   private static status: WhatsAppIntegrationStatus = WhatsAppIntegrationStatus.DISCONNECTED;
@@ -57,6 +84,8 @@ export class BaileysService {
   private static watchdogTimer: NodeJS.Timeout | null = null;
   private static isSendingQueue = false;
   private static messageMemoryCache = new Map<string, proto.IMessage>();
+  private static msgRetryCounterCache = new SimpleMemoryCache(3600000);
+  private static userDevicesCache = new SimpleMemoryCache(300000);
 
   public static cacheMessage(id: string, message: proto.IMessage | null | undefined) {
     if (!id || !message) return;
@@ -271,17 +300,17 @@ export class BaileysService {
         },
         logger,
         printQRInTerminal: false,
-        browser: ['ByteForge Automation', 'Chrome', '124.0.0.0'],
+        browser: Browsers.ubuntu('Chrome'),
         connectTimeoutMs: 60000,
         keepAliveIntervalMs: 15000,
-        // STANDALONE MULTI-DEVICE OPTIMIZATIONS:
-        // Do not demand full chat history from the phone; runs 100% independently even if phone is offline or WhatsApp is closed
         syncFullHistory: false,
         shouldSyncHistoryMessage: () => false,
-        markOnlineOnConnect: false,
+        markOnlineOnConnect: true,
         defaultQueryTimeoutMs: 60000,
         generateHighQualityLinkPreview: false,
         emitOwnEvents: false,
+        msgRetryCounterCache: this.msgRetryCounterCache as any,
+        userDevicesCache: this.userDevicesCache as any,
         getMessage: async (key: proto.IMessageKey) => {
           return this.getMessage(key);
         },
@@ -320,6 +349,12 @@ export class BaileysService {
           this.log(`Connected successfully to WhatsApp as +${this.displayPhoneNumber}! (Standalone Multi-Device Active)`);
           await this.syncDatabaseIntegrationStatus();
           this.broadcastState();
+
+          // Immediately announce active online presence so WhatsApp servers route pre-keys actively
+          await this.sock?.sendPresenceUpdate('available').catch(() => {});
+
+          // Attach Guaranteed Retry Handshake Interceptor
+          this.attachRetryReceiptInterceptor();
 
           // Process queued message jobs that were retained while offline
           setImmediate(() => {
@@ -515,6 +550,94 @@ export class BaileysService {
     this.isExplicitlyStopped = false;
     await this.connect();
     return { success: true, message: 'WhatsApp session reset. Generating fresh QR code...' };
+  }
+
+  /**
+   * Intercepts incoming WhatsApp retry receipts directly from the WebSocket stream.
+   * Solves the upstream Baileys bug where retry receipts from recipients in 1-on-1 chats
+   * have `fromMe: false` and are silently ignored, leaving recipient screens stuck on:
+   * "Waiting for this message. This may take a while. Learn more".
+   */
+  private static attachRetryReceiptInterceptor() {
+    if (!this.sock || !(this.sock as any).ws) return;
+
+    try {
+      const ws = (this.sock as any).ws;
+      if (!ws) return;
+      if (ws._hasCustomRetryInterceptor) return;
+      ws._hasCustomRetryInterceptor = true;
+
+      ws.on('CB:receipt', async (node: any) => {
+        if (!node || node.tag !== 'receipt') return;
+        const attrs = node.attrs || {};
+        if (attrs.type !== 'retry') return;
+
+        const from = attrs.from;
+        const participant = attrs.participant || from;
+        if (!from) return;
+
+        // Collect all target message IDs (root id + nested item nodes)
+        const ids: string[] = [attrs.id].filter(Boolean);
+        if (Array.isArray(node.content)) {
+          for (const item of node.content) {
+            if (item && item.tag === 'item' && item.attrs?.id) {
+              ids.push(item.attrs.id);
+            }
+          }
+        }
+
+        if (ids.length === 0) return;
+
+        // Parse retry count from node attrs or nested <retry> element
+        let retryCount = +(attrs.count || 1);
+        if (Array.isArray(node.content)) {
+          const retryChild = node.content.find((item: any) => item && item.tag === 'retry');
+          if (retryChild?.attrs?.count) {
+            retryCount = +retryChild.attrs.count;
+          }
+        }
+
+        this.log(`[Decryption Sync] Recipient +${from.split('@')[0]} requested retry for message ${ids.join(', ')} (attempt ${retryCount}). Re-encrypting with fresh Signal session...`);
+
+        // Force fresh Signal prekey fetch & session rebuild with requesting participant
+        await (this.sock as any).assertSessions?.([participant], true).catch(() => {});
+
+        for (const targetId of ids) {
+          try {
+            const originalMsg = await this.getMessage({ id: targetId, remoteJid: from });
+            if (!originalMsg) {
+              this.log(`[Decryption Sync] Could not locate message ${targetId} to resend for retry.`, 'warn');
+              continue;
+            }
+
+            const isPoll = !!(originalMsg.pollCreationMessage || originalMsg.pollCreationMessageV2 || originalMsg.pollCreationMessageV3);
+            const additionalNodes: any[] = [];
+            if (isPoll) {
+              additionalNodes.push({
+                tag: 'meta',
+                attrs: { polltype: 'creation' },
+              });
+            }
+
+            await (this.sock as any).relayMessage?.(from, originalMsg, {
+              messageId: targetId,
+              participant: {
+                jid: participant,
+                count: retryCount,
+              },
+              additionalNodes,
+              useUserDevicesCache: false,
+            });
+
+            this.log(`[Decryption Sync] Successfully delivered re-encrypted message ${targetId} to +${participant.split('@')[0]}!`);
+          } catch (resendErr: any) {
+            this.log(`[Decryption Sync] Error during retry resend for ${targetId}: ${resendErr.message}`, 'error');
+          }
+        }
+      });
+    } catch (e: any) {
+      this.log(`Failed to attach retry interceptor: ${e.message}`, 'warn');
+    }
   }
 
   /**
@@ -1014,6 +1137,9 @@ export class BaileysService {
     if (!this.sock) return;
 
     try {
+      // 0. Proactively assert/establish Signal encryption session keys before sending
+      await (this.sock as any).assertSessions?.([jid], false).catch(() => {});
+
       // 1. Subscribe to recipient presence (triggers session key handshake)
       await this.sock.presenceSubscribe(jid).catch(() => {});
       await delay(400 + Math.floor(Math.random() * 250));
@@ -1042,7 +1168,15 @@ export class BaileysService {
       throw new Error('WhatsApp is not connected');
     }
 
-    const formattedJid = toWhatsAppJid(jid);
+    const rawJid = toWhatsAppJid(jid);
+    const cleanPhone = rawJid.split('@')[0];
+    let formattedJid = rawJid;
+    try {
+      const onWaList = await this.sock.onWhatsApp(cleanPhone).catch(() => []);
+      if (Array.isArray(onWaList) && onWaList.length > 0 && onWaList[0]?.exists && onWaList[0]?.jid) {
+        formattedJid = onWaList[0].jid;
+      }
+    } catch {}
 
     // Human typing simulation
     await this.simulateHumanTyping(formattedJid, text.length);
@@ -1062,7 +1196,16 @@ export class BaileysService {
       throw new Error('WhatsApp is not connected');
     }
 
-    const formattedJid = toWhatsAppJid(jid);
+    const rawJid = toWhatsAppJid(jid);
+    const cleanPhone = rawJid.split('@')[0];
+    let formattedJid = rawJid;
+    try {
+      const onWaList = await this.sock.onWhatsApp(cleanPhone).catch(() => []);
+      if (Array.isArray(onWaList) && onWaList.length > 0 && onWaList[0]?.exists && onWaList[0]?.jid) {
+        formattedJid = onWaList[0].jid;
+      }
+    } catch {}
+
     const safeQuestion = question.trim().length > 255
       ? question.trim().slice(0, 252) + '...'
       : question.trim();
@@ -1267,8 +1410,16 @@ export class BaileysService {
         try {
           const params = job.parameters as any;
           const bodyText = params.renderedBody || 'Please confirm your order.';
-          const jid = toWhatsAppJid(job.recipientPhone);
-          const cleanPhone = jid.split('@')[0];
+          const rawJid = toWhatsAppJid(job.recipientPhone);
+          const cleanPhone = rawJid.split('@')[0];
+
+          let jid = rawJid;
+          try {
+            const onWaList = await this.sock.onWhatsApp(cleanPhone).catch(() => []);
+            if (Array.isArray(onWaList) && onWaList.length > 0 && onWaList[0]?.exists && onWaList[0]?.jid) {
+              jid = onWaList[0].jid;
+            }
+          } catch {}
 
           // Anti-ban delay
           await delay(delayMs);
