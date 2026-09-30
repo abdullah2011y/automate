@@ -285,18 +285,11 @@ export const testSendTemplate = async (
 
     if (isPoll) {
       // Unified single message: send ONLY the interactive confirmation poll
-      const renderedPollQuestion = (pollQuestion
+      const renderedPollQuestion = pollQuestion
         ? TemplateService.render(pollQuestion, sampleVars).trim()
-        : '') || 'Aapka order confirm karein:';
+        : '';
 
-      let singleTitle = rendered.trim();
-      if (renderedPollQuestion && !singleTitle.toLowerCase().includes(renderedPollQuestion.toLowerCase())) {
-        singleTitle = `${singleTitle}\n\n${renderedPollQuestion}`.trim();
-      }
-
-      const safeQuestion = singleTitle.length > 255
-        ? singleTitle.slice(0, 252) + '...'
-        : singleTitle;
+      const safeQuestion = TemplateService.formatSinglePollQuestion(rendered, renderedPollQuestion);
 
       await BaileysService.sendDirectPoll(
         recipientPhone,

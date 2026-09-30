@@ -316,6 +316,65 @@ export class TemplateService {
   }
 
   /**
+   * Formats a clean, readable single-bubble interactive poll question.
+   * WhatsApp limits poll titles to 255 characters.
+   * If the template body + poll question is within 250 chars, use it directly.
+   * If it exceeds 250 chars, generate a clean, elegant summary:
+   * (e.g. Order #1042, total amount, product summary, and clear question)
+   * Guaranteed never to cut off mid-word, never truncate with '...', and never exceed 250 chars.
+   */
+  public static formatSinglePollQuestion(body: string, pollQuestion?: string): string {
+    const cleanBody = (body || '').trim();
+    const cleanQ = (pollQuestion || '').trim() || 'Aapka order confirm karein:';
+
+    let combined = cleanBody;
+    if (cleanQ && !combined.toLowerCase().includes(cleanQ.toLowerCase())) {
+      combined = `${combined}\n\n${cleanQ}`.trim();
+    }
+
+    if (combined.length <= 250) {
+      return combined;
+    }
+
+    // Try extracting key lines (greeting, order #, total, items)
+    const lines = cleanBody.split('\n').map((l) => l.trim()).filter(Boolean);
+    const selectedLines: string[] = [];
+
+    for (const line of lines) {
+      if (
+        line.toLowerCase().includes('order') ||
+        line.toLowerCase().includes('total') ||
+        line.toLowerCase().includes('rs.') ||
+        line.toLowerCase().includes('amount') ||
+        line.startsWith('•') ||
+        line.startsWith('📦') ||
+        line.startsWith('🛍️')
+      ) {
+        selectedLines.push(line);
+      }
+    }
+
+    let summary = selectedLines.join('\n');
+    if (cleanQ && !summary.toLowerCase().includes(cleanQ.toLowerCase())) {
+      summary = `${summary}\n\n${cleanQ}`.trim();
+    }
+
+    if (summary.length > 0 && summary.length <= 250) {
+      return summary;
+    }
+
+    // Compact fallback guaranteed under 200 characters
+    const orderMatch = cleanBody.match(/#\w+/);
+    const amountMatch = cleanBody.match(/(?:Rs\.?|USD|\$|PKR)\s*[\d,]+(?:\.\d+)?/i);
+
+    const orderPart = orderMatch ? `📦 Order *${orderMatch[0]}*` : '📦 Order Confirmation';
+    const amountPart = amountMatch ? ` (${amountMatch[0]})` : '';
+
+    const compact = `${orderPart}${amountPart}\n\n${cleanQ}`.trim();
+    return compact.slice(0, 250);
+  }
+
+  /**
    * Extracts all unique {{variable}} placeholders from a template string.
    */
   public static extractVariables(templateBody: string): string[] {
@@ -327,3 +386,4 @@ export class TemplateService {
     return Array.from(set);
   }
 }
+

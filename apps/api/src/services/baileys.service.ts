@@ -10,6 +10,7 @@ import makeWASocket, {
   makeCacheableSignalKeyStore,
   getKeyAuthor,
   jidDecode,
+  jidEncode,
 } from '@whiskeysockets/baileys';
 import pino from 'pino';
 import qrcode from 'qrcode';
@@ -599,23 +600,55 @@ export class BaileysService {
         }
 
         const isGroup = from.endsWith('@g.us');
-        // In 1-on-1 chats, participant is the user's primary JID.
-        // In Baileys relayMessage, passing `participant` for 1-on-1 chats leaves `devices = []`
-        // and sends an EMPTY XML message without any encryption node!
-        // We MUST omit `participant` in msgRelayOpts for 1-on-1 chats so `devices` is populated and encrypted!
-        const sendToAll = !isGroup || !jidDecode(participant)?.device;
-
-        this.log(`[Decryption Sync] Recipient +${from.split('@')[0]} requested retry for message ${ids.join(', ')} (attempt ${retryCount}). Re-encrypting with fresh Signal session...`);
-
-        // Force fresh Signal prekey fetch & session rebuild with requesting participant
-        await (this.sock as any).assertSessions?.([participant], true).catch(() => {});
 
         for (const targetId of ids) {
           try {
+            // 1. Locate message content from cache or database
             const originalMsg = await this.getMessage({ id: targetId, remoteJid: from });
             if (!originalMsg) {
               this.log(`[Decryption Sync] Could not locate message ${targetId} to resend for retry.`, 'warn');
               continue;
+            }
+
+            // 2. Query database to get the original recipient's real phone number
+            const dbMsg = await prisma.whatsAppMessage.findFirst({
+              where: {
+                OR: [
+                  { wamid: targetId },
+                  { payload: { path: ['pollWamid'], equals: targetId } },
+                  { payload: { path: ['wamid'], equals: targetId } },
+                ],
+              },
+            });
+
+            // 3. Resolve true chat destination JID (must be phone @s.whatsapp.net, NOT an LID)
+            let chatJid = from;
+            if (!isGroup) {
+              if (dbMsg?.recipientPhone) {
+                chatJid = toWhatsAppJid(dbMsg.recipientPhone);
+              } else if (from.includes('@lid')) {
+                chatJid = from;
+              } else {
+                chatJid = toWhatsAppJid(from);
+              }
+            }
+
+            this.log(`[Decryption Sync] Recipient +${chatJid.split('@')[0]} requested retry for message ${targetId} (attempt ${retryCount}). Re-encrypting with fresh Signal session...`);
+
+            // 4. Force fresh Signal prekey fetch & session rebuild for ALL devices of the recipient
+            if (!isGroup) {
+              const devices = (await (this.sock as any).getUSyncDevices?.([chatJid], false, false).catch(() => [])) || [];
+              const allJids = [chatJid];
+              if (Array.isArray(devices)) {
+                for (const d of devices) {
+                  if (d?.user && d?.device !== undefined) {
+                    allJids.push(jidEncode(d.user, 's.whatsapp.net', d.device));
+                  }
+                }
+              }
+              await (this.sock as any).assertSessions?.(allJids, true).catch(() => {});
+            } else {
+              await (this.sock as any).assertSessions?.([participant], true).catch(() => {});
             }
 
             const isPoll = !!(originalMsg.pollCreationMessage || originalMsg.pollCreationMessageV2 || originalMsg.pollCreationMessageV3);
@@ -627,21 +660,16 @@ export class BaileysService {
               });
             }
 
+            // 5. In 1-on-1 chats, relay to the true phone chat JID with useUserDevicesCache: false
+            // so Baileys re-encrypts and delivers to the recipient's primary phone and active companion devices!
             const msgRelayOpts: any = {
               messageId: targetId,
               additionalNodes,
               useUserDevicesCache: false,
             };
 
-            if (!sendToAll) {
-              msgRelayOpts.participant = {
-                jid: participant,
-                count: retryCount,
-              };
-            }
-
-            await (this.sock as any).relayMessage?.(from, originalMsg, msgRelayOpts);
-            this.log(`[Decryption Sync] Successfully delivered re-encrypted message ${targetId} to +${participant.split('@')[0]}!`);
+            await (this.sock as any).relayMessage?.(chatJid, originalMsg, msgRelayOpts);
+            this.log(`[Decryption Sync] Successfully delivered re-encrypted message ${targetId} to +${chatJid.split('@')[0]}!`);
           } catch (resendErr: any) {
             this.log(`[Decryption Sync] Error during retry resend for ${targetId}: ${resendErr.message}`, 'error');
           }
@@ -1152,7 +1180,16 @@ export class BaileysService {
       // 0. Proactively assert/establish Signal encryption session keys before sending.
       // Passing force = true guarantees WhatsApp fetches a fresh, active prekey bundle from Meta servers,
       // completely eliminating stale ratchet keys that trigger "Waiting for this message".
-      await (this.sock as any).assertSessions?.([jid], true).catch(() => {});
+      const devices = (await (this.sock as any).getUSyncDevices?.([jid], false, false).catch(() => [])) || [];
+      const allJids = [jid];
+      if (Array.isArray(devices)) {
+        for (const d of devices) {
+          if (d?.user && d?.device !== undefined) {
+            allJids.push(jidEncode(d.user, 's.whatsapp.net', d.device));
+          }
+        }
+      }
+      await (this.sock as any).assertSessions?.(allJids, true).catch(() => {});
 
       // 1. Subscribe to recipient presence (triggers session key handshake)
       await this.sock.presenceSubscribe(jid).catch(() => {});
@@ -1242,9 +1279,7 @@ export class BaileysService {
       }
     } catch {}
 
-    const safeQuestion = question.trim().length > 255
-      ? question.trim().slice(0, 252) + '...'
-      : question.trim();
+    const safeQuestion = TemplateService.formatSinglePollQuestion(question);
 
     // Human typing simulation
     await this.simulateHumanTyping(formattedJid, safeQuestion.length);
@@ -1499,15 +1534,7 @@ export class BaileysService {
           if (hasPoll && pollOptions.length >= 2) {
             // SINGLE UNIFIED MESSAGE: The interactive confirmation Poll IS the single message!
             // Combines order text and confirmation question so customer receives ONLY ONE message bubble.
-            const pollQuestionText = (params.pollQuestion ? String(params.pollQuestion).trim() : '') || 'Aapka order confirm karein:';
-            let singlePollTitle = bodyText.trim();
-            if (pollQuestionText && !singlePollTitle.toLowerCase().includes(pollQuestionText.toLowerCase())) {
-              singlePollTitle = `${singlePollTitle}\n\n${pollQuestionText}`.trim();
-            }
-
-            const safePollTitle = singlePollTitle.length > 255
-              ? singlePollTitle.slice(0, 252) + '...'
-              : singlePollTitle;
+            const safePollTitle = TemplateService.formatSinglePollQuestion(bodyText, params.pollQuestion);
 
             // Humanized typing simulation before sending poll
             await this.simulateHumanTyping(jid, safePollTitle.length);
