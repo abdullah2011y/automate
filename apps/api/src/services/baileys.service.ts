@@ -9,6 +9,7 @@ import makeWASocket, {
   decryptPollVote,
   makeCacheableSignalKeyStore,
   getKeyAuthor,
+  jidDecode,
 } from '@whiskeysockets/baileys';
 import pino from 'pino';
 import qrcode from 'qrcode';
@@ -597,6 +598,13 @@ export class BaileysService {
           }
         }
 
+        const isGroup = from.endsWith('@g.us');
+        // In 1-on-1 chats, participant is the user's primary JID.
+        // In Baileys relayMessage, passing `participant` for 1-on-1 chats leaves `devices = []`
+        // and sends an EMPTY XML message without any encryption node!
+        // We MUST omit `participant` in msgRelayOpts for 1-on-1 chats so `devices` is populated and encrypted!
+        const sendToAll = !isGroup || !jidDecode(participant)?.device;
+
         this.log(`[Decryption Sync] Recipient +${from.split('@')[0]} requested retry for message ${ids.join(', ')} (attempt ${retryCount}). Re-encrypting with fresh Signal session...`);
 
         // Force fresh Signal prekey fetch & session rebuild with requesting participant
@@ -619,16 +627,20 @@ export class BaileysService {
               });
             }
 
-            await (this.sock as any).relayMessage?.(from, originalMsg, {
+            const msgRelayOpts: any = {
               messageId: targetId,
-              participant: {
-                jid: participant,
-                count: retryCount,
-              },
               additionalNodes,
               useUserDevicesCache: false,
-            });
+            };
 
+            if (!sendToAll) {
+              msgRelayOpts.participant = {
+                jid: participant,
+                count: retryCount,
+              };
+            }
+
+            await (this.sock as any).relayMessage?.(from, originalMsg, msgRelayOpts);
             this.log(`[Decryption Sync] Successfully delivered re-encrypted message ${targetId} to +${participant.split('@')[0]}!`);
           } catch (resendErr: any) {
             this.log(`[Decryption Sync] Error during retry resend for ${targetId}: ${resendErr.message}`, 'error');
@@ -1182,8 +1194,30 @@ export class BaileysService {
     await this.simulateHumanTyping(formattedJid, text.length);
 
     const sent = await this.sock.sendMessage(formattedJid, { text });
-    if (sent?.key?.id && sent?.message) {
-      this.cacheMessage(sent.key.id, sent.message);
+    const msgId = sent?.key?.id || `baileys_${Date.now()}`;
+    if (sent?.message) {
+      this.cacheMessage(msgId, sent.message);
+
+      try {
+        const tenant = await prisma.tenant.findFirst();
+        if (tenant) {
+          await prisma.whatsAppMessage.create({
+            data: {
+              tenantId: tenant.id,
+              wamid: msgId,
+              recipientPhone: cleanPhone,
+              direction: MessageDirection.OUTBOUND,
+              status: MessageStatus.SENT,
+              messageType: 'text',
+              payload: {
+                body: text,
+                rawMessage: JSON.parse(JSON.stringify(sent.message)),
+              } as any,
+              sentAt: new Date(),
+            },
+          }).catch(() => {});
+        }
+      } catch {}
     }
     return sent;
   }
@@ -1220,8 +1254,38 @@ export class BaileysService {
         selectableCount: 1,
       },
     });
-    if (sent?.key?.id && sent?.message) {
-      this.cacheMessage(sent.key.id, sent.message);
+
+    const msgId = sent?.key?.id || `baileys_poll_${Date.now()}`;
+    if (sent?.message) {
+      this.cacheMessage(msgId, sent.message);
+
+      try {
+        const tenant = await prisma.tenant.findFirst();
+        if (tenant) {
+          const secretBuffer = sent.message.messageContextInfo?.messageSecret;
+          const secretBase64 = secretBuffer ? Buffer.from(secretBuffer).toString('base64') : null;
+          await prisma.whatsAppMessage.create({
+            data: {
+              tenantId: tenant.id,
+              wamid: msgId,
+              recipientPhone: cleanPhone,
+              direction: MessageDirection.OUTBOUND,
+              status: MessageStatus.SENT,
+              messageType: 'poll',
+              payload: {
+                body: safeQuestion,
+                hasPoll: true,
+                pollQuestion: safeQuestion,
+                pollOptions: options.map((t, idx) => ({ id: `opt_${idx}`, text: t })),
+                pollWamid: msgId,
+                messageSecretBase64: secretBase64,
+                rawMessage: JSON.parse(JSON.stringify(sent.message)),
+              } as any,
+              sentAt: new Date(),
+            },
+          }).catch(() => {});
+        }
+      } catch {}
     }
     return sent;
   }
