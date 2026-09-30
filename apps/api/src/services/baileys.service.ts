@@ -641,9 +641,25 @@ export class BaileysService {
               chatJid = toWhatsAppJid(cleanPhone);
             }
 
+            if (retryCount > 3) {
+              this.log(`[Decryption Sync] Recipient +${chatJid.split('@')[0]} reached retry limit (${retryCount}) for message ${targetId}. Waiting for recipient client sync.`, 'warn');
+              continue;
+            }
+
             this.log(`[Decryption Sync] Recipient +${chatJid.split('@')[0]} requested retry for message ${targetId} (attempt ${retryCount}). Re-encrypting with fresh Signal session...`);
 
-            // 4. Force fresh Signal prekey fetch & session rebuild for the recipient's phone JID
+            // 4. Invalidate stale session from PostgreSQL and cache so assertSessions queries a pristine PreKey bundle
+            if (cleanPhone) {
+              await prisma.whatsAppSession.deleteMany({
+                where: {
+                  sessionId: 'default',
+                  key: { startsWith: `session_${cleanPhone}` },
+                },
+              }).catch(() => {});
+              this.userDevicesCache.del(chatJid);
+              this.userDevicesCache.del(`${cleanPhone}@s.whatsapp.net`);
+            }
+
             // CRITICAL: NEVER pass an @lid to assertSessions! Meta rejects @lid in prekey IQ queries and terminates the WebSocket with statusCode 428.
             if (!isGroup && chatJid.endsWith('@s.whatsapp.net')) {
               await (this.sock as any).assertSessions?.([chatJid], true).catch(() => {});
@@ -1212,6 +1228,29 @@ export class BaileysService {
       await delay(250 + Math.floor(Math.random() * 250));
     } catch {
       // Non-fatal if presence fails on network edge
+    }
+  }
+
+  /**
+   * Cleans up any stale or corrupted Signal session keys for a recipient
+   * to guarantee that subsequent outgoing messages force a pristine PreKey handshake.
+   */
+  public static async purgeRecipientSessions(phone: string): Promise<void> {
+    const cleanPhone = phone.replace(/\D/g, '');
+    if (!cleanPhone) return;
+
+    try {
+      await prisma.whatsAppSession.deleteMany({
+        where: {
+          sessionId: 'default',
+          key: { startsWith: `session_${cleanPhone}` },
+        },
+      });
+      this.userDevicesCache.del(toWhatsAppJid(cleanPhone));
+      this.userDevicesCache.del(`${cleanPhone}@s.whatsapp.net`);
+      this.log(`Purged stale Signal session records for +${cleanPhone}`);
+    } catch (err: any) {
+      this.log(`Error purging session for +${cleanPhone}: ${err.message}`, 'warn');
     }
   }
 

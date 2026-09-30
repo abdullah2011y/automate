@@ -281,6 +281,9 @@ export const testSendTemplate = async (
     const sampleVars = variables || TemplateService.getSampleVariables();
     const rendered = TemplateService.render(body, sampleVars);
 
+    // Purge any stale test session records to force fresh Signal PreKey handshake
+    await BaileysService.purgeRecipientSessions(recipientPhone).catch(() => {});
+
     const isPoll = hasPoll !== false && Array.isArray(pollOptions) && pollOptions.length >= 2;
 
     if (isPoll) {
