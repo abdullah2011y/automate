@@ -1149,8 +1149,10 @@ export class BaileysService {
     if (!this.sock) return;
 
     try {
-      // 0. Proactively assert/establish Signal encryption session keys before sending
-      await (this.sock as any).assertSessions?.([jid], false).catch(() => {});
+      // 0. Proactively assert/establish Signal encryption session keys before sending.
+      // Passing force = true guarantees WhatsApp fetches a fresh, active prekey bundle from Meta servers,
+      // completely eliminating stale ratchet keys that trigger "Waiting for this message".
+      await (this.sock as any).assertSessions?.([jid], true).catch(() => {});
 
       // 1. Subscribe to recipient presence (triggers session key handshake)
       await this.sock.presenceSubscribe(jid).catch(() => {});
