@@ -302,7 +302,7 @@ export class BaileysService {
         },
         logger,
         printQRInTerminal: false,
-        browser: Browsers.ubuntu('Chrome'),
+        browser: Browsers.macOS('Desktop'),
         connectTimeoutMs: 60000,
         keepAliveIntervalMs: 15000,
         syncFullHistory: false,
