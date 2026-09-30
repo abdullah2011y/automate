@@ -83,26 +83,45 @@ export class BaileysService {
     // 2. Database lookup
     try {
       const dbMsg = await prisma.whatsAppMessage.findFirst({
-        where: { wamid: key.id },
+        where: {
+          OR: [
+            { wamid: key.id },
+            { payload: { path: ['pollWamid'], equals: key.id } },
+            { payload: { path: ['wamid'], equals: key.id } },
+          ],
+        },
         select: { payload: true, messageType: true },
       });
 
       if (dbMsg?.payload) {
         const p = dbMsg.payload as any;
         if (p.rawMessage) {
-          this.cacheMessage(key.id, p.rawMessage);
-          return p.rawMessage as proto.IMessage;
+          const raw = JSON.parse(JSON.stringify(p.rawMessage));
+          // Restore messageSecret Buffer if present to guarantee Signal decryption parity
+          if (raw.messageContextInfo?.messageSecret) {
+            const sec = raw.messageContextInfo.messageSecret;
+            if (sec?.data && Array.isArray(sec.data)) {
+              raw.messageContextInfo.messageSecret = Buffer.from(sec.data);
+            } else if (typeof sec === 'string') {
+              raw.messageContextInfo.messageSecret = Buffer.from(sec, 'base64');
+            }
+          }
+          this.cacheMessage(key.id, raw);
+          return raw as proto.IMessage;
         }
 
         if (dbMsg.messageType === 'poll' || p.hasPoll) {
           const opts = Array.isArray(p.pollOptions) ? p.pollOptions : [];
-          const pollTitle = (p.pollQuestion || 'Aapka order confirm karein:').trim();
-          const safeTitle = pollTitle.length > 245 ? pollTitle.slice(0, 242) + '...' : pollTitle;
+          let pollTitle = (p.body || p.pollQuestion || 'Aapka order confirm karein:').trim();
+          if (p.pollQuestion && !pollTitle.toLowerCase().includes(p.pollQuestion.toLowerCase())) {
+            pollTitle = `${pollTitle}\n\n${p.pollQuestion}`.trim();
+          }
+          const safeTitle = pollTitle.length > 255 ? pollTitle.slice(0, 252) + '...' : pollTitle;
 
           const reconstructed: proto.IMessage = {
             pollCreationMessageV3: {
               name: safeTitle,
-              options: opts.map((opt: any) => ({ optionName: String(opt.text || opt.name || opt) })),
+              options: opts.map((opt: any) => ({ optionName: String(opt.text || opt.name || opt).slice(0, 100) })),
               selectableOptionsCount: 1,
             },
             messageContextInfo: {
@@ -984,7 +1003,39 @@ export class BaileysService {
   }
 
   /**
-   * Sends a direct text message through the active Baileys socket.
+   * Simulates realistic human behavior before sending a message:
+   * 1. Subscribes to recipient presence (triggers session prekey handshake on WhatsApp servers).
+   * 2. Sends 'composing' presence update (customer sees "typing..." on WhatsApp).
+   * 3. Waits realistic typing delay based on message length with natural human jitter.
+   * 4. Pauses typing right before dispatch.
+   * This completely prevents WhatsApp E2EE session ratchet errors ("Waiting for this message").
+   */
+  public static async simulateHumanTyping(jid: string, textOrTitleLength: number = 50): Promise<void> {
+    if (!this.sock) return;
+
+    try {
+      // 1. Subscribe to recipient presence (triggers session key handshake)
+      await this.sock.presenceSubscribe(jid).catch(() => {});
+      await delay(400 + Math.floor(Math.random() * 250));
+
+      // 2. Mark composing ("typing..." status visible on customer WhatsApp)
+      await this.sock.sendPresenceUpdate('composing', jid).catch(() => {});
+
+      // 3. Human typing speed simulation: ~15-25ms per character, bound between 1.8s and 4.2s
+      const baseDelay = Math.max(1800, Math.min(4200, textOrTitleLength * 20));
+      const jitter = Math.floor(Math.random() * 600);
+      await delay(baseDelay + jitter);
+
+      // 4. Natural human pause before pressing send
+      await this.sock.sendPresenceUpdate('paused', jid).catch(() => {});
+      await delay(250 + Math.floor(Math.random() * 250));
+    } catch {
+      // Non-fatal if presence fails on network edge
+    }
+  }
+
+  /**
+   * Sends a direct text message through the active Baileys socket with humanized typing.
    */
   public static async sendDirectMessage(jid: string, text: string) {
     if (!this.sock || this.status !== WhatsAppIntegrationStatus.CONNECTED) {
@@ -992,6 +1043,10 @@ export class BaileysService {
     }
 
     const formattedJid = toWhatsAppJid(jid);
+
+    // Human typing simulation
+    await this.simulateHumanTyping(formattedJid, text.length);
+
     const sent = await this.sock.sendMessage(formattedJid, { text });
     if (sent?.key?.id && sent?.message) {
       this.cacheMessage(sent.key.id, sent.message);
@@ -1000,7 +1055,7 @@ export class BaileysService {
   }
 
   /**
-   * Sends a native WhatsApp single-choice poll directly through the active Baileys socket.
+   * Sends a native WhatsApp single-choice poll directly through the active Baileys socket with humanized typing.
    */
   public static async sendDirectPoll(jid: string, question: string, options: string[]) {
     if (!this.sock || this.status !== WhatsAppIntegrationStatus.CONNECTED) {
@@ -1008,11 +1063,17 @@ export class BaileysService {
     }
 
     const formattedJid = toWhatsAppJid(jid);
-    const safeQuestion = question.length > 245 ? question.slice(0, 242) + '...' : question;
+    const safeQuestion = question.trim().length > 255
+      ? question.trim().slice(0, 252) + '...'
+      : question.trim();
+
+    // Human typing simulation
+    await this.simulateHumanTyping(formattedJid, safeQuestion.length);
+
     const sent = await this.sock.sendMessage(formattedJid, {
       poll: {
         name: safeQuestion,
-        values: options,
+        values: options.map((opt) => String(opt).slice(0, 100)),
         selectableCount: 1,
       },
     });
@@ -1219,27 +1280,25 @@ export class BaileysService {
           const pollOptions: PollOption[] = params.pollOptions || DEFAULT_POLL_OPTIONS;
 
           if (hasPoll && pollOptions.length >= 2) {
-            // 1. Send the FULL, complete, untruncated message body as a standard text message.
-            // No matter how big the template is, 100% of the customer details, products, and notes are delivered!
-            const textSent = await this.sock.sendMessage(jid, { text: bodyText });
-            const textWamid = textSent?.key?.id || `baileys_text_${Date.now()}`;
-            if (textSent?.message) {
-              this.cacheMessage(textWamid, textSent.message);
+            // SINGLE UNIFIED MESSAGE: The interactive confirmation Poll IS the single message!
+            // Combines order text and confirmation question so customer receives ONLY ONE message bubble.
+            const pollQuestionText = (params.pollQuestion ? String(params.pollQuestion).trim() : '') || 'Aapka order confirm karein:';
+            let singlePollTitle = bodyText.trim();
+            if (pollQuestionText && !singlePollTitle.toLowerCase().includes(pollQuestionText.toLowerCase())) {
+              singlePollTitle = `${singlePollTitle}\n\n${pollQuestionText}`.trim();
             }
 
-            // Brief delay between text and poll so WhatsApp orders them properly in conversation
-            await delay(400);
+            const safePollTitle = singlePollTitle.length > 255
+              ? singlePollTitle.slice(0, 252) + '...'
+              : singlePollTitle;
 
-            // 2. Send the interactive confirmation Poll containing the question and options
-            const pollQuestionText = (params.pollQuestion ? String(params.pollQuestion).trim() : '') || 'Aapka order confirm karein:';
-            const safePollQuestion = pollQuestionText.length > 245
-              ? pollQuestionText.slice(0, 242) + '...'
-              : pollQuestionText;
+            // Humanized typing simulation before sending poll
+            await this.simulateHumanTyping(jid, safePollTitle.length);
 
             const pollSent = await this.sock.sendMessage(jid, {
               poll: {
-                name: safePollQuestion,
-                values: pollOptions.map((opt: any) => opt.text),
+                name: safePollTitle,
+                values: pollOptions.map((opt: any) => String(opt.text).slice(0, 100)),
                 selectableCount: 1,
               },
             });
@@ -1255,7 +1314,9 @@ export class BaileysService {
               secretBase64 = Buffer.from(secretBuffer).toString('base64');
             }
           } else {
-            // When poll is disabled, send standard full text message only
+            // Humanized typing simulation before sending text
+            await this.simulateHumanTyping(jid, bodyText.length);
+
             const textSent = await this.sock.sendMessage(jid, { text: bodyText });
             wamid = textSent?.key?.id || `baileys_${Date.now()}`;
             if (textSent?.message) {
