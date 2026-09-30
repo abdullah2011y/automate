@@ -635,21 +635,9 @@ export class BaileysService {
 
             this.log(`[Decryption Sync] Recipient +${chatJid.split('@')[0]} requested retry for message ${targetId} (attempt ${retryCount}). Re-encrypting with fresh Signal session...`);
 
-            // 4. Force fresh Signal prekey fetch & session rebuild for ALL devices of the recipient
-            if (!isGroup) {
-              const devices = (await (this.sock as any).getUSyncDevices?.([chatJid], false, false).catch(() => [])) || [];
-              const allJids = [chatJid];
-              if (Array.isArray(devices)) {
-                for (const d of devices) {
-                  if (d?.user && d?.device !== undefined) {
-                    allJids.push(jidEncode(d.user, 's.whatsapp.net', d.device));
-                  }
-                }
-              }
-              await (this.sock as any).assertSessions?.(allJids, true).catch(() => {});
-            } else {
-              await (this.sock as any).assertSessions?.([participant], true).catch(() => {});
-            }
+            // 4. Force fresh Signal prekey fetch & session rebuild for the requesting participant
+            const requestingParticipant = participant || from;
+            await (this.sock as any).assertSessions?.([requestingParticipant, chatJid], true).catch(() => {});
 
             const isPoll = !!(originalMsg.pollCreationMessage || originalMsg.pollCreationMessageV2 || originalMsg.pollCreationMessageV3);
             const additionalNodes: any[] = [];
@@ -660,12 +648,13 @@ export class BaileysService {
               });
             }
 
-            // 5. In 1-on-1 chats, relay to the true phone chat JID with useUserDevicesCache: false
-            // so Baileys re-encrypts and delivers to the recipient's primary phone and active companion devices!
+            // 5. In 1-on-1 chats, relay targeting the specific participant device or fanout
+            const hasDevice = !!jidDecode(requestingParticipant)?.device;
             const msgRelayOpts: any = {
               messageId: targetId,
               additionalNodes,
               useUserDevicesCache: false,
+              ...(hasDevice ? { participant: { jid: requestingParticipant, count: retryCount } } : {}),
             };
 
             await (this.sock as any).relayMessage?.(chatJid, originalMsg, msgRelayOpts);
@@ -1177,10 +1166,8 @@ export class BaileysService {
     if (!this.sock) return;
 
     try {
-      // 0. Proactively assert/establish Signal encryption session keys before sending.
-      // Passing force = true guarantees WhatsApp fetches a fresh, active prekey bundle from Meta servers,
-      // completely eliminating stale ratchet keys that trigger "Waiting for this message".
-      const devices = (await (this.sock as any).getUSyncDevices?.([jid], false, false).catch(() => [])) || [];
+      // 0. Ensure Signal encryption sessions exist without destroying active ratchet state
+      const devices = (await (this.sock as any).getUSyncDevices?.([jid], false, true).catch(() => [])) || [];
       const allJids = [jid];
       if (Array.isArray(devices)) {
         for (const d of devices) {
@@ -1189,7 +1176,7 @@ export class BaileysService {
           }
         }
       }
-      await (this.sock as any).assertSessions?.(allJids, true).catch(() => {});
+      await (this.sock as any).assertSessions?.(allJids, false).catch(() => {});
 
       // 1. Subscribe to recipient presence (triggers session key handshake)
       await this.sock.presenceSubscribe(jid).catch(() => {});
