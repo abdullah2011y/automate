@@ -1283,14 +1283,14 @@ export class BaileysService {
       }
     } catch {}
 
-    const safeQuestion = TemplateService.formatSinglePollQuestion(question);
+    const cleanQuestion = (question || 'Aapka order confirm karein:').trim().slice(0, 255);
 
     // Human typing simulation
-    await this.simulateHumanTyping(formattedJid, safeQuestion.length);
+    await this.simulateHumanTyping(formattedJid, cleanQuestion.length);
 
     const sent = await this.sock.sendMessage(formattedJid, {
       poll: {
-        name: safeQuestion,
+        name: cleanQuestion,
         values: options.map((opt) => String(opt).slice(0, 100)),
         selectableCount: 1,
       },
@@ -1314,9 +1314,9 @@ export class BaileysService {
               status: MessageStatus.SENT,
               messageType: 'poll',
               payload: {
-                body: safeQuestion,
+                body: cleanQuestion,
                 hasPoll: true,
-                pollQuestion: safeQuestion,
+                pollQuestion: cleanQuestion,
                 pollOptions: options.map((t, idx) => ({ id: `opt_${idx}`, text: t })),
                 pollWamid: msgId,
                 messageSecretBase64: secretBase64,
